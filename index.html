@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BodaSoko - Local Delivery Platform</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- USER TYPE SELECTION PAGE -->
+    <div id="user-selection" class="user-selection active">
+        <div class="selection-container">
+            <div class="header-section">
+                <h1 class="main-title">🏍️ BodaSoko</h1>
+                <p class="main-subtitle">Local Delivery Made Easy</p>
+                <p class="main-description">Connecting riders, businesses and customers within 50km</p>
+            </div>
+
+            <div class="cards-grid">
+                <!-- Customer Card -->
+                <div class="user-card" onclick="selectUserType('customer')">
+                    <div class="card-icon">👤</div>
+                    <h3 class="card-title">I am a Customer</h3>
+                    <p class="card-description">Order from local shops and restaurants</p>
+                    <div class="card-features">
+                        <div class="feature-row">
+                            <span>✓ Fast delivery</span>
+                            <span>✓ Real tracking</span>
+                        </div>
+                        <div class="feature-row">
+                            <span>✓ 50+ shops</span>
+                            <span>✓ Pay on delivery</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rider Card -->
+                <div class="user-card" onclick="selectUserType('rider')">
+                    <div class="card-icon">🏍️</div>
+                    <h3 class="card-title">I am a Rider</h3>
+                    <p class="card-description">Earn money delivering orders</p>
+                    <div class="card-features rider-features">
+                        <div class="feature-row">
+                            <span>✓ Flexible hours</span>
+                            <span>✓ Daily pay</span>
+                        </div>
+                        <div class="feature-row">
+                            <span>✓ KES 50-200/trip</span>
+                            <span>✓ Free signup</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Business Card -->
+                <div class="user-card" onclick="selectUserType('business')">
+                    <div class="card-icon">🏪</div>
+                    <h3 class="card-title">I am a Business</h3>
+                    <p class="card-description">Reach more customers</p>
+                    <div class="card-features business-features">
+                        <div class="feature-row">
+                            <span>✓ More sales</span>
+                            <span>✓ Zero setup</span>
+                        </div>
+                        <div class="feature-row">
+                            <span>✓ Commission: 10%</span>
+                            <span>✓ Easy dashboard</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- NAVIGATION BAR -->
+    <nav id="navbar" class="navbar hidden">
+        <div class="nav-container">
+            <div class="nav-left">
+                <h1 class="logo" onclick="showPage('browse')">🏍️ BodaSoko</h1>
+                <div class="nav-links" id="nav-links">
+                    <button onclick="showPage('browse')">Browse</button>
+                    <button onclick="showPage('my-orders')">My Orders</button>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="location-badge">
+                    <span class="location-icon">📍</span>
+                    <span>Chuka, Tharaka-Nithi</span>
+                </div>
+                <button class="cart-btn" onclick="toggleCart()" id="cart-btn">
+                    🛒
+                    <span class="cart-badge" id="cart-badge">0</span>
+                </button>
+                <button class="switch-btn" onclick="switchUser()">Switch</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- CUSTOMER BROWSE PAGE -->
+    <div id="browse-page" class="page hidden">
+        <div class="page-header">
+            <h1>Order from Local Businesses 🛍️</h1>
+            <p>Fast delivery within 50km • 20-40 minutes</p>
+        </div>
+
+        <div class="page-content">
+            <!-- Search and Filter -->
+            <div class="search-section">
+                <div class="search-bar">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="search-input" placeholder="Search shops or items..." oninput="filterBusinesses()">
+                </div>
+                <div class="category-pills" id="category-pills">
+                    <button class="pill active" data-category="all" onclick="selectCategory('all')">🏪 All</button>
+                    <button class="pill" data-category="food" onclick="selectCategory('food')">🍽️ Food</button>
+                    <button class="pill" data-category="groceries" onclick="selectCategory('groceries')">🛒 Groceries</button>
+                    <button class="pill" data-category="health" onclick="selectCategory('health')">💊 Health</button>
+                </div>
+            </div>
+
+            <!-- Businesses Grid -->
+            <div class="businesses-grid" id="businesses-grid"></div>
+        </div>
+    </div>
+
+    <!-- RIDER DASHBOARD -->
+    <div id="rider-page" class="page hidden">
+        <div class="page-header page-header-green">
+            <h1>🏍️ Rider Dashboard</h1>
+            <div class="rider-status-control">
+                <button class="status-btn" id="status-btn" onclick="toggleRiderStatus()">
+                    Go Online
+                </button>
+                <span id="status-text">Status: Offline</span>
+            </div>
+        </div>
+
+        <div class="page-content">
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-value">KES 3,450</div>
+                    <div class="stat-label">Today Earnings</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-value">12</div>
+                    <div class="stat-label">Completed Trips</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⭐</div>
+                    <div class="stat-value">4.8</div>
+                    <div class="stat-label">Rating</div>
+                </div>
+            </div>
+
+            <!-- Available Orders -->
+            <div class="orders-section">
+                <h2>Available Orders Near You 📍</h2>
+                <div id="available-orders"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BUSINESS DASHBOARD -->
+    <div id="business-page" class="page hidden">
+        <div class="page-header page-header-blue">
+            <h1>🏪 Business Dashboard</h1>
+            <p>Mama Njeri Shop • Chuka Town</p>
+        </div>
+
+        <div class="page-content">
+            <!-- Business Stats -->
+            <div class="stats-grid stats-grid-4">
+                <div class="stat-card">
+                    <div class="stat-icon">📊</div>
+                    <div class="stat-value">KES 15,240</div>
+                    <div class="stat-label">Today Sales</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">✓</div>
+                    <div class="stat-value">23</div>
+                    <div class="stat-label">Completed Orders</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⏳</div>
+                    <div class="stat-value">5</div>
+                    <div class="stat-label">Pending Orders</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">⭐</div>
+                    <div class="stat-value">4.8</div>
+                    <div class="stat-label">Rating</div>
+                </div>
+            </div>
+
+            <!-- Recent Orders -->
+            <div class="orders-section">
+                <h2>Recent Orders 📋</h2>
+                <div id="business-orders"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SHOPPING CART SIDEBAR -->
+    <div id="cart-sidebar" class="cart-sidebar">
+        <div class="cart-header">
+            <h2>🛒 Your Cart</h2>
+            <button class="close-btn" onclick="toggleCart()">✕</button>
+        </div>
+
+        <div class="cart-items" id="cart-items">
+            <div class="cart-empty" id="cart-empty">
+                <div class="empty-icon">🛒</div>
+                <p>Your cart is empty</p>
+            </div>
+        </div>
+
+        <div class="cart-footer hidden" id="cart-footer">
+            <div class="cart-totals">
+                <div class="total-row">
+                    <span>Subtotal</span>
+                    <span id="subtotal">KES 0</span>
+                </div>
+                <div class="total-row">
+                    <span>Delivery Fee</span>
+                    <span id="delivery-fee">KES 0</span>
+                </div>
+                <div class="total-row grand-total">
+                    <span>Total</span>
+                    <span id="grand-total">KES 0</span>
+                </div>
+            </div>
+            <button class="checkout-btn" onclick="placeOrder()">
+                Place Order 🚀
+            </button>
+            <p class="payment-note">💳 Pay on delivery</p>
+        </div>
+    </div>
+
+    <!-- Cart Overlay -->
+    <div id="cart-overlay" class="cart-overlay" onclick="toggleCart()"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

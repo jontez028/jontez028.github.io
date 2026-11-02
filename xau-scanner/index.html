@@ -92,13 +92,13 @@ button:focus-visible, input:focus-visible, label:focus-within { outline: 2px sol
 #banner[hidden] { display: none; }
 
 /* trend overlay */
-.trendbox { position: absolute; right: 70px; bottom: 28px; width: 156px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font: 500 11px var(--f-mono); overflow: hidden; z-index: 1; }
-.trendbox .r { display: grid; grid-template-columns: 1fr 78px; border-top: 1px solid var(--line); }
+.trendbox { position: absolute; right: 70px; bottom: 28px; width: 214px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; font: 500 11px var(--f-mono); overflow: hidden; z-index: 1; }
+.trendbox .r { display: grid; grid-template-columns: 1fr 84px; border-top: 1px solid var(--line); }
 .trendbox .r:first-child { border-top: 0; }
-.trendbox .r > span { padding: 3px 8px; line-height: 14px; }
-.trendbox .r > span:first-child { color: var(--mute); }
+.trendbox .r > span { padding: 3px 8px; line-height: 14px; white-space: nowrap; }
+.trendbox .r > span:first-child { color: var(--fg); font-weight: 600; text-align: right; background: #131722; color: #fff; }
 .trendbox .c { text-align: center; font-weight: 600; font-size: 10.5px; }
-.c.b2 { background: #1f8f62; color: #04120b; } .c.b1 { background: #1a4a39; color: #8fe0bd; } .c.n0 { background: var(--panel2); color: var(--mute); } .c.s1 { background: #4e2229; color: #f0a0a8; } .c.s2 { background: #b13a46; color: #1a0508; }
+.c.b2 { background: #1fb35a; color: #fff; } .c.b1 { background: #2e8b57; color: #fff; } .c.n0 { background: #2a2e39; color: #b2b5be; } .c.s1 { background: #d9474f; color: #fff; } .c.s2 { background: #ff3b47; color: #fff; }
 .trendbox .hdr { cursor: pointer; }
 
 /* right rail */
@@ -641,8 +641,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
-  st.tv = ls.get('xau.tv') === null ? !(window.claude && window.claude.use) : ls.get('xau.tv') === '1';
-  st.ct = ls.get('xau.ct') === 'dark' ? 'dark' : 'light'; st.ema = ls.get('xau.ema') === '1';
+  st.tv = ls.get('xau.tv') === '1';
+  st.ct = ls.get('xau.ct') === 'light' ? 'light' : 'dark'; st.ema = ls.get('xau.ema') === '1';
   const sgn = x => (x >= 0 ? '+' : '') + x.toFixed(2);
   const sgn0 = x => (x >= 0 ? '+' : '') + Math.round(x);
   const pips = x => Math.round(Math.abs(x) * 10).toLocaleString('en-US');
@@ -1011,7 +1011,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   /* ---------- chart (TradingView light look: blue up, red down, session boxes) ---------- */
   const CT = {
     light: { bg: '#ffffff', grid: '#dcdfe6', axis: '#131722', mute: '#787b86', up: '#2962ff', dn: '#f23645', tp: '#089981', sl: '#f23645', e20: '#ff9800', e50: '#7e57c2', xh: '#131722', xhText: '#ffffff', entry: '#787b86' },
-    dark: { bg: '#0e131a', grid: '#232c39', axis: '#d6dde6', mute: '#7b8796', up: '#4c8dff', dn: '#f0525e', tp: '#27b57c', sl: '#e5535f', e20: '#d9ae4a', e50: '#6f8fb8', xh: '#d6dde6', xhText: '#080b10', entry: '#7b8796' }
+    dark: { bg: '#0b111c', grid: '#18212f', axis: '#d6dde6', mute: '#7b8796', up: '#4c8dff', dn: '#f0525e', tp: '#27b57c', sl: '#e5535f', e20: '#d9ae4a', e50: '#6f8fb8', xh: '#d6dde6', xhText: '#080b10', entry: '#7b8796' }
   };
   const lb = (arr, t) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].t < t) lo = mid + 1; else hi = mid; } return lo; };
   function drawChart() {
@@ -1093,34 +1093,40 @@ if (typeof module !== 'undefined') module.exports = Engine;
       for (let k = k0; k <= Math.min(j, lastIdx); k++) { const x = X(k), y = Y(a2[0][k]); if (!on) { g.moveTo(x, y); on = true; } else g.lineTo(x, y); }
       g.stroke();
     });
-    // signal markers and exits
+    // signal markers like the TradingView indicator: Buy/Sell pills on the signal candle, TP/SL labels where trades ended
+    const pill = (txt, x, y, col, dir) => {
+      g.font = '700 10.5px "IBM Plex Sans", sans-serif'; const tw = g.measureText(txt).width + 14, th = 18, top0 = dir > 0 ? y : y - th;
+      g.fillStyle = col; g.beginPath(); g.moveTo(x, dir > 0 ? y - 6 : y + 6); g.lineTo(x - 4, dir > 0 ? y : y); g.lineTo(x + 4, dir > 0 ? y : y); g.closePath(); g.fill();
+      g.beginPath(); if (g.roundRect) g.roundRect(x - tw / 2, top0, tw, th, 3); else g.rect(x - tw / 2, top0, tw, th); g.fill();
+      g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, x, top0 + th / 2 + 1);
+    };
     g.textAlign = 'center';
     trs.forEach(t => {
       if (t.sigIdx >= first && t.sigIdx <= j) {
-        const b = tf.bars[t.sigIdx], x = X(t.sigIdx), buy = t.side === 1, col = buy ? T.tp : T.sl, y = buy ? Y(b.l) + 14 : Y(b.h) - 14;
-        g.fillStyle = col; g.beginPath();
-        if (buy) { g.moveTo(x, y - 9); g.lineTo(x - 5, y - 1); g.lineTo(x + 5, y - 1); } else { g.moveTo(x, y + 9); g.lineTo(x - 5, y + 1); g.lineTo(x + 5, y + 1); }
-        g.closePath(); g.fill();
-        g.font = '700 9px "IBM Plex Sans", sans-serif'; g.fillText(buy ? 'BUY' : 'SELL', x, buy ? y + 8 : y - 8); g.font = MONO;
+        const b = tf.bars[t.sigIdx], x = X(t.sigIdx), buy = t.side === 1;
+        if (buy) pill('Buy', x, Y(b.l) + 8, '#00bcd4', 1); else pill('Sell', x, Y(b.h) - 8, '#e91e63', -1);
       }
       if (t.exitEnd <= cur && t.exitIdx >= first && t.exitIdx <= j) {
-        g.fillStyle = t.R > 0 ? T.tp : T.sl; g.beginPath(); g.arc(X(t.exitIdx), Y(t.exitPx), 3.2, 0, 6.3); g.fill();
-        g.strokeStyle = T.bg; g.lineWidth = 1; g.stroke();
+        const x = X(t.exitIdx), y = Y(t.exitPx), lab = t.exitK === 'STOP+1R' ? 'TP1' : t.exitK === 'BE' ? 'BE' : t.exitK === 'TIME' ? 'T' : t.exitK, win = t.R > 0;
+        g.fillStyle = win ? T.tp : T.sl; g.beginPath(); g.arc(x, y, 2.2, 0, 6.3); g.fill();
+        g.fillStyle = T.axis; g.font = '700 9.5px "IBM Plex Sans", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(lab, x, y + (t.side === 1 ? -10 : 11));
       }
     });
-    // the open trade: entry, stop, TP1 to TP3
+    g.font = MONO; g.textBaseline = 'middle';
+    // the open trade: green zone to TP3, red zone to the stop, tagged levels at the right
     if (open) {
-      const s = E.statusAt(open, cur), x1 = X(open.sigIdx), x2 = plotW;
-      const bands = [[open.entry, open.tp[0], T.tp + '20'], [open.tp[0], open.tp[1], T.tp + '2c'], [open.tp[1], open.tp[2], T.tp + '38'], [open.entry, open.sl, T.sl + '2c']];
-      bands.forEach(b => { g.fillStyle = b[2]; g.fillRect(x1, Math.min(Y(b[0]), Y(b[1])), x2 - x1, Math.abs(Y(b[1]) - Y(b[0]))); });
-      const lines = [['TP3', open.tp[2], T.tp, s.hit[2]], ['TP2', open.tp[1], T.tp, s.hit[1]], ['TP1', open.tp[0], T.tp, s.hit[0]], ['ENTRY', open.entry, T.entry, false], ['SL', s.stop, T.sl, false]];
+      const s = E.statusAt(open, cur), x1 = X(open.sigIdx), x2 = plotW - 6;
+      const zone = (a, b2, col) => { const ya = Y(a), yb = Y(b2), gr = g.createLinearGradient(0, ya, 0, yb); gr.addColorStop(0, col + '08'); gr.addColorStop(1, col + '4d'); g.fillStyle = gr; g.fillRect(x1, Math.min(ya, yb), x2 - x1, Math.abs(yb - ya)); };
+      zone(open.entry, open.tp[2], '#00c853'); zone(open.entry, open.sl, '#ff1744');
+      const lines = [['TP3', open.tp[2], '#2ecc00', s.hit[2]], ['TP2', open.tp[1], '#2ecc00', s.hit[1]], ['TP1', open.tp[0], '#2ecc00', s.hit[0]], ['Entry', open.entry, '#787b86', false], ['SL', s.stop, '#ff1744', false]];
       lines.forEach(l => {
-        const y = Math.round(Y(l[1])) + .5; g.strokeStyle = l[2]; g.lineWidth = 1; g.setLineDash(l[0] === 'ENTRY' ? [4, 3] : []);
+        const y = Math.round(Y(l[1])) + .5; g.strokeStyle = l[2]; g.lineWidth = 1; g.setLineDash(l[0] === 'Entry' ? [4, 3] : []);
         g.beginPath(); g.moveTo(x1, y); g.lineTo(x2, y); g.stroke(); g.setLineDash([]);
-        const t = l[0] + (l[3] ? ' ✓' : '') + ' ' + fmt(l[1]); g.font = '600 10.5px "IBM Plex Mono", monospace'; const tw = g.measureText(t).width + 10;
-        g.fillStyle = l[2]; g.fillRect(x2 - tw - 4, y - 9, tw, 18); g.fillStyle = '#ffffff'; g.textAlign = 'left'; g.fillText(t, x2 - tw + 1, y + 1);
+        const t = l[0] + (l[3] ? ' ✓' : '') + ' (' + fmt(l[1], 2) + ')'; g.font = '700 10.5px "IBM Plex Sans", sans-serif'; const tw = g.measureText(t).width + 14;
+        g.fillStyle = l[2]; g.beginPath(); if (g.roundRect) g.roundRect(x2 - tw + 6, y - 10, tw, 20, 3); else g.rect(x2 - tw + 6, y - 10, tw, 20); g.fill();
+        g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, x2 - tw / 2 + 6, y + 1);
       });
-      g.font = MONO;
+      g.font = MONO; g.textBaseline = 'middle';
     }
     // last price: dotted line and tag, coloured by the live candle
     const lp = E.price(), ly = Y(lp), lcol = lp >= (fm ? fm.o : tf.bars[j].o) ? T.up : T.dn;
@@ -1204,9 +1210,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const cur = E.S.cursor, all = E.biasAt(cur, E.S.list[0]), b = all.bias, open = isClosed() ? null : E.openAt(st.tf, cur);
     const cls = s => s >= 3 ? 'b2' : s > 0 ? 'b1' : s <= -3 ? 's2' : s < 0 ? 's1' : 'n0';
     const overall = b >= 20 ? ['Bullish', 'b2'] : b >= 8 ? ['Mild bull', 'b1'] : b <= -20 ? ['Bearish', 's2'] : b <= -8 ? ['Mild bear', 's1'] : ['Range', 'n0'];
-    let h = '<div class="r hdr" id="tbHdr"><span>Position</span><span class="c ' + (open ? (open.side === 1 ? 'b2' : 's2') : 'n0') + '">' + (open ? (open.side === 1 ? 'Buy' : 'Sell') : isClosed() ? 'Closed' : 'None') + '</span></div>' +
-      '<div class="r"><span>Trend ' + sgn0(b) + '</span><span class="c ' + overall[1] + '">' + overall[0] + '</span></div>';
-    if (trendOpen) all.per.forEach(p => { h += '<div class="r"><span>' + (p.m === 1440 ? 'Daily' : E.LABEL[p.m]) + '</span><span class="c ' + (p.ok ? cls(p.s) : 'n0') + '">' + (p.ok ? E.trendLabel(p.s) : 'No data') + '</span></div>'; });
+    let h = '<div class="r hdr" id="tbHdr"><span>Current Position</span><span class="c ' + (open ? (open.side === 1 ? 'b2' : 's2') : 'n0') + '">' + (open ? (open.side === 1 ? 'Buy' : 'Sell') : isClosed() ? 'Closed' : 'None') + '</span></div>' +
+      '<div class="r"><span>Current Trend</span><span class="c ' + overall[1] + '">' + overall[0] + '</span></div>';
+    if (trendOpen) all.per.forEach(p => { h += '<div class="r"><span>' + (p.m === 1440 ? 'Daily:' : p.m >= 60 ? E.LABEL[p.m] + ':' : p.m + ' min:') + '</span><span class="c ' + (p.ok ? cls(p.s) : 'n0') + '">' + (p.ok ? E.trendLabel(p.s) : 'No data') + '</span></div>'; });
     $('#trendbox').innerHTML = h;
   }
   $('#trendbox').addEventListener('click', e => { if (e.target.closest('#tbHdr')) { trendOpen = !trendOpen; renderTrendBox(); } });

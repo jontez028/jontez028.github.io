@@ -85,7 +85,7 @@ button:focus-visible, input:focus-visible, label:focus-within { outline: 2px sol
 .chartcard[data-ct="light"] .c.s1 { background: #fbd5d9; color: #8c1c28; }
 .chartcard[data-ct="light"] .seg button[aria-pressed="true"] { background: #e8eefc; color: #2962ff; }
 .chartwrap { position: relative; flex: 1 1 0; min-height: 0; background: var(--panel); }
-#chart { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+#chart { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
 .legend { position: absolute; left: 12px; top: 30px; display: flex; gap: 12px; font: 500 11px var(--f-mono); color: var(--mute); pointer-events: none; }
 .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
 #banner { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); max-width: calc(100% - 220px); padding: 5px 10px; border: 1px solid var(--warn); border-radius: 4px; background: var(--panel); color: var(--warn); font: 500 11.5px var(--f-body); text-align: center; z-index: 2; }
@@ -196,7 +196,6 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <span id="live" class="livetag">Connecting</span>
         <span class="lbl" id="srcName"></span>
         <div class="seg" id="viewSeg" role="group" aria-label="Chart options" style="margin-left:auto">
-          <button type="button" id="bSess" aria-pressed="true" title="Session boxes in UTC: Tokyo 00:00-09:00, London 07:00-16:00, New York 13:00-22:00">Sessions</button>
           <button type="button" id="bEma" aria-pressed="false">EMA</button>
           <button type="button" id="bTheme">Dark chart</button>
         </div>
@@ -206,6 +205,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <div class="ohlcline" id="ohlc"></div>
         <div class="legend" id="legend" hidden><span><i id="l20"></i>EMA 20</span><span><i id="l50"></i>EMA 50</span></div>
         <div id="banner" hidden></div>
+        <button class="btn" id="toLatest" type="button" hidden style="position:absolute;right:76px;top:8px;z-index:2;padding:4px 10px;font-size:11px">Latest &#9654;</button>
         <div class="trendbox" id="trendbox"></div>
       </div>
     </section>
@@ -284,9 +284,9 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
 /* XAU Scanner engine: data, indicators, multi-timeframe trend, signals, backtest.
    All indicator arrays are causal. Higher-timeframe reads only use completed bars. */
 const Engine = (function () {
-  const TFS = [5, 15, 30, 60, 120, 240, 480, 1440];
-  const LABEL = { 5: '5m', 15: '15m', 30: '30m', 60: '1H', 120: '2H', 240: '4H', 480: '8H', 1440: '1D' };
-  const W = { 5: 1, 15: 1.5, 30: 2, 60: 3, 120: 3.5, 240: 4, 480: 4.5, 1440: 5 };
+  const TFS = [1, 5, 15, 30, 60, 120, 240, 480, 1440];
+  const LABEL = { 1: '1m', 5: '5m', 15: '15m', 30: '30m', 60: '1H', 120: '2H', 240: '4H', 480: '8H', 1440: '1D' };
+  const W = { 1: 0.6, 5: 1, 15: 1.5, 30: 2, 60: 3, 120: 3.5, 240: 4, 480: 4.5, 1440: 5 };
   const P = { minRisk: 2.0, cost: 0.30, maxBars: 48, thresh: 55, biasMin: 30, slMin: 0.8, slMax: 2.5 };
   const S = { base: [], baseMin: 5, list: [], tfs: {}, bt: {}, cursor: 0, startCursor: 0, hasFuture: false, source: 'Simulated', warm: 0, live: false };
 
@@ -383,7 +383,7 @@ const Engine = (function () {
     }
     return normalise(rows);
   }
-  function normalise(rows) {
+  function normalise(rows, keep1) {
     rows.sort((a, b) => a.t - b.t);
     const d = []; for (const r of rows) { if (d.length && d[d.length - 1].t === r.t) d[d.length - 1] = r; else d.push(r); }
     if (d.length < 200) throw new Error('Too few valid candles (' + d.length + ').');
@@ -391,7 +391,7 @@ const Engine = (function () {
     dts.sort((a, b) => a - b);
     const baseMin = Math.round(dts[Math.floor(dts.length / 2)] / 60);
     if ([1, 5, 15, 30, 60].indexOf(baseMin) < 0) throw new Error('Candle interval of ' + baseMin + ' min is not supported. Use 1, 5, 15, 30 or 60 minutes.');
-    if (baseMin === 1) return { bars: resample(d, 5, 1).map(b => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c })), baseMin: 5 };
+    if (baseMin === 1 && !keep1) return { bars: resample(d, 5, 1).map(b => ({ t: b.t, o: b.o, h: b.h, l: b.l, c: b.c })), baseMin: 5 };
     return { bars: d, baseMin: baseMin };
   }
 
@@ -592,10 +592,11 @@ const Engine = (function () {
   /* ---------- market map ---------- */
   function zones(cur) {
     const tf = S.tfs[60] || S.tfs[S.list[S.list.length - 1]], j = lastDone(tf, cur), b = tf.bars, px = price();
-    let sup = null, dem = null;
+    let sup = null, dem = null; const sups = [];
     for (let k = j - 2; k >= Math.max(2, j - 300); k--) {
       if (b[k].h >= b[k - 1].h && b[k].h >= b[k - 2].h && b[k].h >= b[k + 1].h && b[k].h >= b[k + 2].h && b[k].h > px) {
-        if (!sup || b[k].h < sup.hi) sup = { hi: b[k].h, lo: Math.max(b[k].o, b[k].c), t: b[k].t };
+        const z = { hi: b[k].h, lo: Math.max(b[k].o, b[k].c), t: b[k].t }; sups.push(z);
+        if (!sup || b[k].h < sup.hi) sup = z;
       }
       if (b[k].l <= b[k - 1].l && b[k].l <= b[k - 2].l && b[k].l <= b[k + 1].l && b[k].l <= b[k + 2].l && b[k].l < px) {
         if (!dem || b[k].l > dem.lo) dem = { lo: b[k].l, hi: Math.min(b[k].o, b[k].c), t: b[k].t };
@@ -603,7 +604,8 @@ const Engine = (function () {
     }
     const n24 = Math.round(1440 / S.baseMin) - 1; let lo = Infinity, hi = -Infinity;
     for (let k = Math.max(0, cur - n24); k <= cur; k++) { if (S.base[k].l < lo) lo = S.base[k].l; if (S.base[k].h > hi) hi = S.base[k].h; }
-    return { sup: sup, dem: dem, lo: lo, hi: hi, pos: hi > lo ? (px - lo) / (hi - lo) : 0.5, price: px, atr1h: tf.atr[j] };
+    sups.sort((x, y) => x.hi - y.hi); const pick = []; sups.forEach(z => { if (pick.length < 3 && pick.every(q => Math.abs(q.hi - z.hi) > tf.atr[j] * 1.5)) pick.push(z); });
+    return { sup: sup, sups: pick, dem: dem, lo: lo, hi: hi, pos: hi > lo ? (px - lo) / (hi - lo) : 0.5, price: px, atr1h: tf.atr[j] };
   }
   function price() { return S.base[S.live ? S.base.length - 1 : S.cursor].c; }
   function forming(tf, cur) {
@@ -625,7 +627,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const fmt = (x, d) => { const n = d === undefined ? 2 : d; return x.toLocaleString('en-US', { minimumFractionDigits: n, maximumFractionDigits: n }); };
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const C = { bg: css('--bg'), line: css('--line'), fg: css('--fg'), mute: css('--mute'), gold: css('--gold'), up: css('--up'), dn: css('--dn'), blue: css('--blue'), panel: css('--panel') };
-  const st = { ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: false, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
+  const st = { off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: false, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
   const pad2 = n => String(n).padStart(2, '0');
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hm = t => { const d = new Date(t * 1000); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
@@ -636,7 +638,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
-  st.ct = ls.get('xau.ct') === 'dark' ? 'dark' : 'light'; st.sess = ls.get('xau.sess') !== '0'; st.ema = ls.get('xau.ema') === '1';
+  st.ct = ls.get('xau.ct') === 'dark' ? 'dark' : 'light'; st.ema = ls.get('xau.ema') === '1';
   const sgn = x => (x >= 0 ? '+' : '') + x.toFixed(2);
   const sgn0 = x => (x >= 0 ? '+' : '') + Math.round(x);
   const pips = x => Math.round(Math.abs(x) * 10).toLocaleString('en-US');
@@ -661,9 +663,14 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   function buildTfButtons() {
     const seg = $('#tfSeg'); seg.innerHTML = '';
-    E.S.list.filter(m => m <= 240).forEach(m => {
+    const ms = E.S.list.filter(m => m <= 240);
+    if (E.S.baseMin > 1 && st.mode === 'twelve') ms.unshift(1);
+    ms.forEach(m => {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = E.LABEL[m]; b.setAttribute('aria-pressed', m === st.tf);
-      b.onclick = () => { st.tf = m; st.seen = null; [...seg.children].forEach(x => x.setAttribute('aria-pressed', x === b)); renderAll(); };
+      b.onclick = () => {
+        if (m === 1 && E.S.baseMin > 1) { st.res = 1; st.pendTf = 1; st.off = 0; connectLive(); return; }
+        st.tf = m; st.off = 0; st.seen = null; [...seg.children].forEach(x => x.setAttribute('aria-pressed', x === b)); renderAll();
+      };
       seg.appendChild(b);
     });
   }
@@ -802,9 +809,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     }
   }
   async function tdHistory(mcp) {
-    let all = [], endDate = null, size = 5000;
-    for (let page = 0; page < 3; page++) {
-      const input = { symbol: TD_SYM, interval: '5min', outputsize: size };
+    let all = [], endDate = null, size = 5000; const one = st.res === 1, pages = one ? 4 : 3;
+    for (let page = 0; page < pages; page++) {
+      const input = { symbol: TD_SYM, interval: one ? '1min' : '5min', outputsize: size };
       if (endDate) input.end_date = endDate;
       let rows;
       try { rows = tdRows(await tdCall(mcp, 'get_time_series', input)); }
@@ -815,9 +822,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
       }
       if (!rows.length) break;
       all = rows.concat(all);
-      msg('Loaded ' + all.length.toLocaleString('en-US') + ' five minute candles from Twelve Data...', '');
+      msg('Loaded ' + all.length.toLocaleString('en-US') + (one ? ' one' : ' five') + ' minute candles from Twelve Data...', '');
       if (rows.length < size * 0.8) break;
-      endDate = tdStamp(rows[0].t - 300);
+      endDate = tdStamp(rows[0].t - (one ? 60 : 300));
     }
     if (all.length < 200) throw bad('Twelve Data returned only ' + all.length + ' candles.');
     return all;
@@ -847,7 +854,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     stopWatch();
     const ms = marketOpen(Date.now() / 1000) ? st.pollMs : 600000;
     st.watchMs = ms; st.mcp = mcp;
-    st.unwatch = mcp.watchTool(TD, 'get_time_series', { symbol: TD_SYM, interval: '5min', outputsize: 48 }, ev => {
+    st.unwatch = mcp.watchTool(TD, 'get_time_series', st.res === 1 ? { symbol: TD_SYM, interval: '1min', outputsize: 60 } : { symbol: TD_SYM, interval: '5min', outputsize: 48 }, ev => {
       if (ev.type === 'data') {
         try { if (mergeRows(fixRows(tdRows(ev.result)))) st.dirty = true; st.lastTick = Date.now(); st.err = ''; }
         catch (e) { st.err = String(e.message).slice(0, 90); }
@@ -860,7 +867,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const raw = await tdHistory(mcp);
     let quote = {}; try { quote = tdQuote(await tdCall(mcp, 'get_quote', { symbol: TD_SYM })); } catch (e) {}
     const tz = pickZone(raw, +quote.last_quote_at); st.conv = tz.conv; st.tzName = tz.zone; st.mode = 'twelve';
-    const res = E.normalise(fixRows(raw));
+    const res = E.normalise(fixRows(raw), st.res === 1);
     let daily = null;
     try {
       const dq = +quote.timestamp - Date.parse(quote.datetime + 'T00:00:00Z') / 1000, shift = isFinite(dq) && Math.abs(dq) <= 14 * 3600 ? dq : 0;
@@ -870,8 +877,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     st.daily = daily && daily.length >= 35 ? daily : null; st.pollMs = plan.ms; st.limit = plan.lim;
     st.lastTick = Date.now(); st.staleAfter = plan.ms * 3 + 60000; st.err = ''; st.note = '';
     E.init(res.bars, res.baseMin, curLive(res.bars), 'Live: Twelve Data XAU/USD', false, true, st.daily);
+    if (st.pendTf && E.S.list.indexOf(st.pendTf) >= 0) st.tf = st.pendTf; st.pendTf = 0;
     afterLoad(); startWatch(mcp); refreshTag();
-    msg('Live from Twelve Data. ' + res.bars.length.toLocaleString('en-US') + ' candles' + (st.daily ? ' plus ' + st.daily.length + ' daily candles' : ', daily trend limited') + '. ' + (tz.ok ? 'Twelve Data stamps candles in ' + tz.zone.replace('_', ' ') + ' time, converted for you.' : 'Could not check which clock Twelve Data uses, so candle times may be off.') + (marketOpen(Date.now() / 1000) ? '' : ' The market is closed, so you are seeing the last session.') + ' Refreshing every ' + Math.round(plan.ms / 1000) + ' seconds to stay inside your ' + plan.lim + ' requests a day.', tz.ok ? 'ok' : 'err');
+    msg('Live from Twelve Data. ' + res.bars.length.toLocaleString('en-US') + (st.res === 1 ? ' one minute candles (about ' + Math.round(res.bars.length / 1440 * 1.4) + ' days of history, so backtests on higher timeframes use a shorter window)' : ' candles') + (st.daily ? ' plus ' + st.daily.length + ' daily candles' : ', daily trend limited') + '. ' + (tz.ok ? 'Twelve Data stamps candles in ' + tz.zone.replace('_', ' ') + ' time, converted for you.' : 'Could not check which clock Twelve Data uses, so candle times may be off.') + (marketOpen(Date.now() / 1000) ? '' : ' The market is closed, so you are seeing the last session.') + ' Refreshing every ' + Math.round(plan.ms / 1000) + ' seconds to stay inside your ' + plan.lim + ' requests a day.', tz.ok ? 'ok' : 'err');
   }
 
   /* Binance perpetual: used when the page runs outside Claude, for example as a saved file */
@@ -916,7 +924,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     st.note = 'Connecting to the live feed. These prices are placeholders until it answers.'; setLive('Connecting', ''); renderAll();
     try {
       let mcp = await getMcp(); if (!mcp && tdKey()) mcp = restShim(); let why = '';
-      if (mcp) { try { await connectTwelve(mcp); return; } catch (e) { why = tdMessage(e); } }
+      if (mcp) { try { await connectTwelve(mcp); return; } catch (e) { why = tdMessage(e); if (st.res === 1) { st.res = 5; why += ' Falling back to 5 minute candles.'; try { await connectTwelve(mcp); return; } catch (e2) {} } } }
       else why = 'Add your Twelve Data API key under Data to get live gold prices here.';
       try { await connectBinance(); return; } catch (e) { if (!mcp) why += ' Binance could not be reached either (' + e.message + ').'; }
       st.mode = 'demo'; setLive('Offline', 'off');
@@ -998,10 +1006,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
 
   /* ---------- chart (TradingView light look: blue up, red down, session boxes) ---------- */
   const CT = {
-    light: { bg: '#ffffff', grid: '#f0f3fa', axis: '#131722', mute: '#787b86', up: '#2962ff', dn: '#f23645', tp: '#089981', sl: '#f23645', e20: '#ff9800', e50: '#7e57c2', xh: '#131722', xhText: '#ffffff', entry: '#787b86' },
-    dark: { bg: '#0e131a', grid: '#1a222d', axis: '#d6dde6', mute: '#7b8796', up: '#4c8dff', dn: '#f0525e', tp: '#27b57c', sl: '#e5535f', e20: '#d9ae4a', e50: '#6f8fb8', xh: '#d6dde6', xhText: '#080b10', entry: '#7b8796' }
+    light: { bg: '#ffffff', grid: '#dcdfe6', axis: '#131722', mute: '#787b86', up: '#2962ff', dn: '#f23645', tp: '#089981', sl: '#f23645', e20: '#ff9800', e50: '#7e57c2', xh: '#131722', xhText: '#ffffff', entry: '#787b86' },
+    dark: { bg: '#0e131a', grid: '#232c39', axis: '#d6dde6', mute: '#7b8796', up: '#4c8dff', dn: '#f0525e', tp: '#27b57c', sl: '#e5535f', e20: '#d9ae4a', e50: '#6f8fb8', xh: '#d6dde6', xhText: '#080b10', entry: '#7b8796' }
   };
-  const SESS = [{ name: 'Tokyo', from: 0, to: 9, col: '#ff9800' }, { name: 'London', from: 7, to: 16, col: '#43a047' }, { name: 'New York', from: 13, to: 22, col: '#2196f3' }];
   const lb = (arr, t) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].t < t) lo = mid + 1; else hi = mid; } return lo; };
   function drawChart() {
     const cv = $('#chart'), dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
@@ -1011,11 +1018,16 @@ if (typeof module !== 'undefined') module.exports = Engine;
     $('#l20').style.background = T.e20; $('#l50').style.background = T.e50;
     const m = st.tf, tf = E.S.tfs[m], cur = E.S.cursor, j = E.lastDone(tf, cur), fm = E.forming(tf, cur);
     const padR = 66, padB = 24, padT = 54, rightBars = Math.round(Math.min(26, Math.max(10, (w - padR) / 30)));
-    const plotW = w - padR, plotH = h - padB - padT, N = Math.min(j + 1, Math.max(20, Math.floor(plotW / 8) - rightBars));
-    const step = plotW / (N + rightBars), lastIdx = fm ? j + 1 : j, first = lastIdx - N + 1;
-    const barAt = k => (k <= j ? tf.bars[k] : fm);
-    const bars = []; for (let k = first; k <= lastIdx; k++) bars.push(barAt(k));
+    const plotW = w - padR, plotH = h - padB - padT, N = Math.max(25, Math.min(Math.round(plotW / 2.2), st.zoom || Math.floor(plotW / 5) - rightBars));
+    const step = plotW / (N + rightBars), top = fm ? j + 1 : j;
+    st.off = Math.max(-Math.floor(N * 0.6), Math.min(st.off, top - 20)); st.step = step; st.N = N;
+    const lastIdx = top - st.off, first = lastIdx - N + 1;
+    $('#toLatest').hidden = st.off <= 0;
+    const barAt = k => (k < 0 || k > top ? null : k <= j ? tf.bars[k] : fm);
+    const bars = []; for (let k = first; k <= lastIdx; k++) { const bb = barAt(k); if (bb) bars.push(bb); }
+    const k0 = Math.max(first, 0), k1 = Math.min(lastIdx, top);
     const open = isClosed() ? null : E.openAt(m, cur), trs = E.trades(m);
+    if (!bars.length) return;
     let lo = Infinity, hi = -Infinity; bars.forEach(b => { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; });
     if (open) { hi = Math.max(hi, open.entry, open.sl, open.tp[2]); lo = Math.min(lo, open.entry, open.sl, open.tp[2]); }
     const pr = (hi - lo) * 0.06; lo -= pr; hi += pr;
@@ -1031,8 +1043,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
     // time ticks in the viewer's local time, day changes in bold
     let spacing = 0;
     if (m < 240) { const pxm = step / m; spacing = [5, 15, 30, 60, 120, 180, 240, 360, 720].find(c => c % m === 0 && c * pxm >= 62) || 0; }
-    const raw = []; let prevDay = first > 0 ? lday(tf.bars[first - 1].t) : -1;
-    for (let k = first; k <= lastIdx; k++) {
+    const raw = []; let prevDay = k0 > 0 ? lday(tf.bars[k0 - 1].t) : -1;
+    for (let k = k0; k <= k1; k++) {
       const b = barAt(k), dk = lday(b.t);
       if (dk !== prevDay) { const d = new Date(b.t * 1000); raw.push({ k: k, day: true, label: d.getDate() === 1 ? MON[d.getMonth()] : String(d.getDate()) }); prevDay = dk; }
       else if (spacing && lmin(b.t) % spacing === 0) raw.push({ k: k, day: false, label: hm(b.t) });
@@ -1046,36 +1058,13 @@ if (typeof module !== 'undefined') module.exports = Engine;
       g.fillStyle = T.axis; g.font = t.day ? '700 11px "IBM Plex Mono", monospace' : MONO; g.fillText(t.label, x, h - 8);
     });
     g.font = MONO; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillStyle = T.mute; g.fillText(TZ, plotW + 8, h - 11);
-    // session boxes: high and low of each session, drawn behind the candles
-    if (st.sess && m < 240) {
-      const from = Math.max(0, first - 150), boxes = [];
-      SESS.forEach(s => {
-        let c = null;
-        for (let k = from; k <= lastIdx; k++) {
-          const b = barAt(k), d = new Date(b.t * 1000), hr = d.getUTCHours() + d.getUTCMinutes() / 60;
-          const inS = s.from <= s.to ? (hr >= s.from && hr < s.to) : (hr >= s.from || hr < s.to), key = Math.floor((b.t - s.from * 3600) / 86400);
-          if (inS) { if (c && c.key === key) { c.k2 = k; c.hi = Math.max(c.hi, b.h); c.lo = Math.min(c.lo, b.l); } else { if (c) boxes.push(c); c = { s: s, key: key, k1: k, k2: k, hi: b.h, lo: b.l }; } }
-          else if (c) { boxes.push(c); c = null; }
-        }
-        if (c) boxes.push(c);
-      });
-      g.textAlign = 'center'; g.font = '500 11px "IBM Plex Sans", sans-serif';
-      boxes.forEach(bx => {
-        if (bx.k2 < first) return;
-        const x1 = bx.k1 < first ? 0 : X(bx.k1) - step / 2, x2 = Math.min(plotW, X(bx.k2) + step / 2), y1 = Y(bx.hi), y2 = Y(bx.lo);
-        g.fillStyle = bx.s.col + '1c'; g.fillRect(x1, y1, x2 - x1, y2 - y1);
-        g.strokeStyle = bx.s.col + 'cc'; g.setLineDash([4, 3]); g.lineWidth = 1; g.strokeRect(Math.round(x1) + .5, Math.round(y1) + .5, x2 - x1, y2 - y1); g.setLineDash([]);
-        if (x2 - x1 > 60) { g.fillStyle = bx.s.col; g.fillText(bx.s.name, (x1 + x2) / 2, Math.max(padT + 8, y1 - 8)); }
-      });
-    }
-    // supply and demand
-    const zn = E.zones(cur);
-    [[zn.sup, T.sl, 'Supply'], [zn.dem, T.tp, 'Demand']].forEach(a2 => {
-      const z = a2[0]; if (!z) return; const y1 = Y(z.hi), y2 = Y(z.lo);
-      if (y2 < padT || y1 > padT + plotH) return;
-      const zi = lb(tf.bars, z.t), x1 = zi <= first ? 0 : (zi > lastIdx ? plotW : X(zi));
-      g.fillStyle = a2[1] + '38'; g.fillRect(x1, y1, plotW - x1, Math.max(3, y2 - y1));
-      g.fillStyle = a2[1]; g.textAlign = 'left'; g.font = '600 10px "IBM Plex Sans", sans-serif'; g.fillText(a2[2].toUpperCase(), Math.max(8, x1 + 6), y1 + 8); g.font = MONO;
+    // supply zones: pink boxes that run from the swing high until price trades through them
+    (E.zones(cur).sups || []).forEach(z => {
+      const y1 = Y(z.hi), y2 = Y(z.lo); if (y2 < padT || y1 > padT + plotH) return;
+      const zi = lb(tf.bars, z.t); let ze = j + 1; for (let k = zi + 1; k <= j; k++) if (tf.bars[k].h > z.hi) { ze = k; break; }
+      const x1 = Math.max(0, X(zi) - step / 2), x2 = Math.min(plotW, ze > j ? plotW : X(ze));
+      if (x2 <= 0 || x1 >= plotW || x2 <= x1) return;
+      g.fillStyle = T.sl + '40'; g.fillRect(x1, y1, x2 - x1, Math.max(3, y2 - y1));
     });
     // finished trades, faint
     trs.forEach(t => {
@@ -1085,18 +1074,18 @@ if (typeof module !== 'undefined') module.exports = Engine;
       g.fillStyle = T.tp + '14'; g.fillRect(x1, Math.min(Y(t.entry), Y(t.tp[2])), x2 - x1, Math.abs(Y(t.tp[2]) - Y(t.entry)));
     });
     // candles
-    const bw = Math.max(2, step * 0.66);
-    bars.forEach((b, i) => {
-      const k = first + i, x = X(k), col = b.c >= b.o ? T.up : T.dn;
+    const bw = Math.max(1, Math.round(step * 0.62));
+    for (let k = k0; k <= k1; k++) {
+      const b = barAt(k), x = X(k), col = b.c >= b.o ? T.up : T.dn;
       g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 1;
       g.beginPath(); g.moveTo(Math.round(x) + .5, Y(b.h)); g.lineTo(Math.round(x) + .5, Y(b.l)); g.stroke();
       const y1 = Y(Math.max(b.o, b.c)), y2 = Y(Math.min(b.o, b.c)), bh = Math.max(1, y2 - y1);
       if (b.forming) { g.fillStyle = col + '66'; g.fillRect(x - bw / 2, y1, bw, bh); g.strokeRect(x - bw / 2 + .5, y1 + .5, bw - 1, Math.max(0, bh - 1)); }
       else g.fillRect(x - bw / 2, y1, bw, bh);
-    });
+    }
     if (st.ema) [[tf.e20, T.e20], [tf.e50, T.e50]].forEach(a2 => {
       g.strokeStyle = a2[1]; g.lineWidth = 1.3; g.beginPath(); let on = false;
-      for (let k = first; k <= j; k++) { const x = X(k), y = Y(a2[0][k]); if (!on) { g.moveTo(x, y); on = true; } else g.lineTo(x, y); }
+      for (let k = k0; k <= Math.min(j, lastIdx); k++) { const x = X(k), y = Y(a2[0][k]); if (!on) { g.moveTo(x, y); on = true; } else g.lineTo(x, y); }
       g.stroke();
     });
     // signal markers and exits
@@ -1133,9 +1122,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     g.strokeStyle = lcol; g.setLineDash([1, 3]); g.lineWidth = 1; g.beginPath(); g.moveTo(0, Math.round(ly) + .5); g.lineTo(plotW, Math.round(ly) + .5); g.stroke(); g.setLineDash([]);
     g.fillStyle = lcol; g.fillRect(plotW + 2, ly - 9, padR - 4, 18); g.fillStyle = '#ffffff'; g.textAlign = 'left'; g.fillText(fmt(lp), plotW + 6, ly + 1);
     // crosshair with price and time tags
-    const hv = st.hover; let hk = lastIdx;
+    const hv = st.hover; let hk = k1;
     if (hv && hv.x < plotW) {
-      hk = Math.max(first, Math.min(lastIdx, Math.round((hv.x - step / 2) / step) + first));
+      hk = Math.max(k0, Math.min(k1, Math.round((hv.x - step / 2) / step) + first));
       const hx = Math.round(X(hk)) + .5, hy = Math.round(Math.max(padT, Math.min(padT + plotH, hv.y))) + .5;
       g.strokeStyle = T.mute; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(hx, padT); g.lineTo(hx, padT + plotH); g.moveTo(0, hy); g.lineTo(plotW, hy); g.stroke(); g.setLineDash([]);
       const pv = hi - (hy - padT) / plotH * (hi - lo); g.fillStyle = T.xh; g.fillRect(plotW + 2, hy - 9, padR - 4, 18); g.fillStyle = T.xhText; g.textAlign = 'left'; g.fillText(fmt(pv), plotW + 6, hy);
@@ -1147,14 +1136,30 @@ if (typeof module !== 'undefined') module.exports = Engine;
     $('#ohlc').innerHTML = '<b>Gold Spot / U.S. Dollar</b> <span class="d">&middot; ' + E.LABEL[m] + ' &middot; ' + esc(E.S.source.replace(/^Live: /, '')) + (b0.forming ? ' &middot; forming' : '') + '</span> <span style="color:' + col0 + '">O ' + fmt(b0.o) + ' H ' + fmt(b0.h) + ' L ' + fmt(b0.l) + ' C ' + fmt(b0.c) + ' ' + sgn(chg) + ' (' + sgn(chg / pc * 100) + '%)</span>';
   }
   const cvEl = $('#chart');
-  cvEl.addEventListener('pointermove', e => { const r = cvEl.getBoundingClientRect(); st.hover = { x: e.clientX - r.left, y: e.clientY - r.top }; drawChart(); });
+  let drag = null;
+  cvEl.addEventListener('pointerdown', e => { drag = { x: e.clientX, off: st.off, moved: false }; try { cvEl.setPointerCapture(e.pointerId); } catch (x) {} cvEl.style.cursor = 'grabbing'; });
+  cvEl.addEventListener('pointermove', e => {
+    const r = cvEl.getBoundingClientRect(); st.hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+    if (drag && st.step) { const d = e.clientX - drag.x; if (Math.abs(d) > 2) drag.moved = true; st.off = drag.off + d / st.step; }
+    drawChart();
+  });
+  const endDrag = () => { drag = null; cvEl.style.cursor = 'crosshair'; };
+  cvEl.addEventListener('pointerup', endDrag); cvEl.addEventListener('pointercancel', endDrag);
   cvEl.addEventListener('pointerleave', () => { st.hover = null; drawChart(); });
+  cvEl.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) { st.off += (e.deltaX || e.deltaY) / (st.step || 5); }
+    else { const n = st.N || 100; st.zoom = Math.round(n * (e.deltaY > 0 ? 1.12 : 0.89)); }
+    drawChart();
+  }, { passive: false });
+  cvEl.addEventListener('dblclick', () => { st.off = 0; st.zoom = 0; drawChart(); });
+  $('#toLatest').onclick = () => { st.off = 0; drawChart(); };
+  window.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || $('#mBt').hidden === false || $('#mData').hidden === false) return; if (e.key === 'ArrowLeft') { st.off += 10; drawChart(); } if (e.key === 'ArrowRight') { st.off -= 10; drawChart(); } });
   function syncView() {
     $('.chartcard').dataset.ct = st.ct;
-    $('#bSess').setAttribute('aria-pressed', st.sess); $('#bEma').setAttribute('aria-pressed', st.ema);
+    $('#bEma').setAttribute('aria-pressed', st.ema);
     $('#bTheme').textContent = st.ct === 'dark' ? 'Light chart' : 'Dark chart'; $('#legend').hidden = !st.ema;
   }
-  $('#bSess').onclick = () => { st.sess = !st.sess; ls.set('xau.sess', st.sess ? '1' : '0'); syncView(); drawChart(); };
   $('#bEma').onclick = () => { st.ema = !st.ema; ls.set('xau.ema', st.ema ? '1' : '0'); syncView(); drawChart(); };
   $('#bTheme').onclick = () => { st.ct = st.ct === 'dark' ? 'light' : 'dark'; ls.set('xau.ct', st.ct); syncView(); drawChart(); };
 

@@ -203,6 +203,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       </div>
       <div class="chartwrap">
         <iframe id="tvf" title="TradingView XAUUSD chart" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff" allow="fullscreen"></iframe>
+        <div id="tvsig" hidden style="position:absolute;left:10px;top:10px;z-index:3;max-width:calc(100% - 90px);background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:6px 10px;font:500 12px var(--f-mono);color:var(--fg);box-shadow:0 1px 6px #0003"></div>
         <canvas id="chart" aria-label="XAUUSD candlestick chart with scanner levels"></canvas>
         <div class="ohlcline" id="ohlc"></div>
         <div class="legend" id="legend" hidden><span><i id="l20"></i>EMA 20</span><span><i id="l50"></i>EMA 50</span></div>
@@ -1168,8 +1169,23 @@ if (typeof module !== 'undefined') module.exports = Engine;
   /* TradingView's own chart, embedded. It cannot draw the scanner's levels, those stay in the signal card on the right. */
   const TVI = { 1: '1', 5: '5', 15: '15', 30: '30', 60: '60', 120: '120', 240: '240' };
   let tvKey = '';
+  function tvSig() {
+    const d = $('#tvsig'); d.hidden = !st.tv; if (!st.tv) return;
+    const m = st.tf, cur = E.S.cursor, lab = E.LABEL[m], f = x => fmt(x);
+    let h;
+    if (!E.S.live) h = '<b class="dn">No live data.</b> ' + (st.mode === 'demo' || E.S.source === 'Simulated' ? 'Press Data and add your Twelve Data API key, then these signals are real.' : 'File data only.');
+    else if (isClosed()) h = '<b class="gold">Market closed.</b> Reopens ' + openLabel() + '. No signals until then.';
+    else {
+      const open = E.openAt(m, cur);
+      if (open) { const s = E.statusAt(open, cur), buy = open.side === 1;
+        h = '<b class="' + (buy ? 'up' : 'dn') + '">' + (buy ? 'BUY' : 'SELL') + ' ' + lab + '</b> entry ' + f(open.entry) + ' &nbsp;SL <span class="dn">' + f(s.stop) + '</span> &nbsp;TP1 <span class="up">' + f(open.tp[0]) + (s.hit[0] ? ' &#10003;' : '') + '</span> &nbsp;TP2 <span class="up">' + f(open.tp[1]) + (s.hit[1] ? ' &#10003;' : '') + '</span> &nbsp;TP3 <span class="up">' + f(open.tp[2]) + (s.hit[2] ? ' &#10003;' : '') + '</span> &nbsp;<span class="mute">score ' + open.score + '</span>'; }
+      else { const b = E.biasAt(cur, m).bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
+        h = '<b>No signal on ' + lab + '.</b> <span class="mute">Bias ' + sgn0(b) + (Math.abs(b) < E.P.biasMin ? ', timeframes disagree' : ', waiting for a pullback or breakout') + (last ? '. Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + f(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) : '') + '</span>'; }
+    }
+    if (d.innerHTML !== h) d.innerHTML = h;
+  }
   function tvSync() {
-    const f = $('#tvf'); if (!f) return;
+    const f = $('#tvf'); if (!f) return; tvSig();
     $('#bTv').setAttribute('aria-pressed', !!st.tv); f.hidden = !st.tv;
     $('#chart').style.visibility = st.tv ? 'hidden' : ''; ['#ohlc', '#toLatest', '#legend', '#banner'].forEach(s => { if (st.tv) $(s).hidden = true; });
     if (!st.tv) { if (typeof drawChart === 'function') setTimeout(drawChart, 0); return; }

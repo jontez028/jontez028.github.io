@@ -196,11 +196,13 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <span id="live" class="livetag">Connecting</span>
         <span class="lbl" id="srcName"></span>
         <div class="seg" id="viewSeg" role="group" aria-label="Chart options" style="margin-left:auto">
+          <button type="button" id="bTv" aria-pressed="false" title="Show the TradingView chart or the scanner chart with signal levels">TradingView</button>
           <button type="button" id="bEma" aria-pressed="false">EMA</button>
           <button type="button" id="bTheme">Dark chart</button>
         </div>
       </div>
       <div class="chartwrap">
+        <iframe id="tvf" title="TradingView XAUUSD chart" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff" allow="fullscreen"></iframe>
         <canvas id="chart" aria-label="XAUUSD candlestick chart with scanner levels"></canvas>
         <div class="ohlcline" id="ohlc"></div>
         <div class="legend" id="legend" hidden><span><i id="l20"></i>EMA 20</span><span><i id="l50"></i>EMA 50</span></div>
@@ -638,6 +640,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+  st.tv = ls.get('xau.tv') === null ? !(window.claude && window.claude.use) : ls.get('xau.tv') === '1';
   st.ct = ls.get('xau.ct') === 'dark' ? 'dark' : 'light'; st.ema = ls.get('xau.ema') === '1';
   const sgn = x => (x >= 0 ? '+' : '') + x.toFixed(2);
   const sgn0 = x => (x >= 0 ? '+' : '') + Math.round(x);
@@ -1011,6 +1014,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   };
   const lb = (arr, t) => { let lo = 0, hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid].t < t) lo = mid + 1; else hi = mid; } return lo; };
   function drawChart() {
+    if (st.tv) return;
     const cv = $('#chart'), dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
     if (!w || !h) return;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
@@ -1158,8 +1162,23 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function syncView() {
     $('.chartcard').dataset.ct = st.ct;
     $('#bEma').setAttribute('aria-pressed', st.ema);
+    tvSync();
     $('#bTheme').textContent = st.ct === 'dark' ? 'Light chart' : 'Dark chart'; $('#legend').hidden = !st.ema;
   }
+  /* TradingView's own chart, embedded. It cannot draw the scanner's levels, those stay in the signal card on the right. */
+  const TVI = { 1: '1', 5: '5', 15: '15', 30: '30', 60: '60', 120: '120', 240: '240' };
+  let tvKey = '';
+  function tvSync() {
+    const f = $('#tvf'); if (!f) return;
+    $('#bTv').setAttribute('aria-pressed', !!st.tv); f.hidden = !st.tv;
+    $('#chart').style.visibility = st.tv ? 'hidden' : ''; ['#ohlc', '#toLatest', '#legend', '#banner'].forEach(s => { if (st.tv) $(s).hidden = true; });
+    if (!st.tv) { if (typeof drawChart === 'function') setTimeout(drawChart, 0); return; }
+    let tz = 'Etc/UTC'; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || tz; } catch (e) {}
+    const q = { symbol: 'OANDA:XAUUSD', interval: TVI[st.tf] || '15', theme: st.ct === 'dark' ? 'dark' : 'light', style: '1', timezone: tz, locale: 'en', hidesidetoolbar: '0', withdateranges: '1', hide_top_toolbar: '1', saveimage: '0', allow_symbol_change: '0', toolbarbg: st.ct === 'dark' ? '0e131a' : 'ffffff', 'overrides': '{}' };
+    const key = JSON.stringify(q); if (key === tvKey) return; tvKey = key;
+    f.src = 'https://s.tradingview.com/widgetembed/?' + Object.keys(q).map(k => k + '=' + encodeURIComponent(q[k])).join('&');
+  }
+  $('#bTv').onclick = () => { st.tv = !st.tv; ls.set('xau.tv', st.tv ? '1' : '0'); syncView(); if (!st.tv) renderAll(); };
   $('#bEma').onclick = () => { st.ema = !st.ema; ls.set('xau.ema', st.ema ? '1' : '0'); syncView(); drawChart(); };
   $('#bTheme').onclick = () => { st.ct = st.ct === 'dark' ? 'light' : 'dark'; ls.set('xau.ct', st.ct); syncView(); drawChart(); };
 
@@ -1270,7 +1289,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   function renderAll() {
-    renderTop(); drawChart(); renderTrendBox(); renderSignal(); renderZones(); renderSnap(); renderBottom();
+    renderTop(); drawChart(); tvSync(); renderTrendBox(); renderSignal(); renderZones(); renderSnap(); renderBottom();
     if (isOpen('#mBt')) renderBacktest();
     $('#dsInfo').textContent = E.S.source + ', ' + E.S.base.length.toLocaleString('en-US') + ' candles';
     $('#feedInfo').textContent = st.mode === 'twelve' ? 'Candle clock: ' + st.tzName.replace('_', ' ') + '. Refresh every ' + Math.round(st.watchMs / 1000) + ' s' + (st.watchMs > st.pollMs ? ' (slowed while the market is closed)' : '') + '. Plan limit ' + st.limit + ' requests a day.' : '';

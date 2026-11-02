@@ -60,7 +60,7 @@ button:focus-visible, input:focus-visible, label:focus-within { outline: 2px sol
 .utc #clock { font: 600 15px/1 var(--f-mono); }
 
 /* main */
-.main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; gap: 8px; min-height: 0; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 346px; gap: 8px; min-height: 0; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
 .card > .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .card > .bd { padding: 8px 12px; }
@@ -120,13 +120,28 @@ button:focus-visible, input:focus-visible, label:focus-within { outline: 2px sol
 .row:first-child { border-top: 0; }
 .row .k { font: 600 10px var(--f-body); letter-spacing: .08em; text-transform: uppercase; color: var(--mute); }
 .zone { border-left: 3px solid; padding-left: 9px; }
-.snap { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.snap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.snap .lbl { font-size: 8.5px; letter-spacing: .06em; }
 .snap > div { background: var(--panel2); border-radius: 4px; padding: 6px 8px; }
-.snap .v { font: 600 15px/1.1 var(--f-mono); margin-top: 4px; }
+.snap .v { font: 600 13.5px/1.1 var(--f-mono); margin-top: 4px; }
 .btn { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; font: 500 12px var(--f-body); cursor: pointer; }
 .btn:hover { border-color: var(--mute); }
 .btn.gold { border-color: var(--gold); color: var(--gold); }
 .btn.solid { background: var(--gold); border-color: var(--gold); color: #1a1405; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+
+
+/* big signal ticket */
+.tk { display: flex; flex-direction: column; gap: 6px; }
+.tkrow { display: grid; grid-template-columns: 62px 1fr auto; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 5px; background: var(--panel2); border-left: 4px solid var(--mute); }
+.tkrow .n { font: 700 13px/1 var(--f-display); letter-spacing: .1em; }
+.tkrow .p { font: 700 20px/1 var(--f-mono); text-align: right; }
+.tkrow .d { font: 600 11px/1.2 var(--f-mono); color: var(--mute); text-align: right; min-width: 52px; }
+.tkrow.tp { border-left-color: #2ecc00; } .tkrow.tp .n { color: #2ecc00; } .tkrow.tp.done { background: #12301a; } .tkrow.tp.done .d { color: #2ecc00; }
+.tkrow.sl { border-left-color: #ff1744; } .tkrow.sl .n { color: #ff1744; }
+.tkrow.en { border-left-color: #9aa3b2; } .tkrow.en .n { color: #cfd4dc; }
+.card.hot { box-shadow: 0 0 0 2px var(--up), 0 0 18px #27b57c55; } .card.hot.sellc { box-shadow: 0 0 0 2px var(--dn), 0 0 18px #e5535f55; }
+.pill { font-size: 20px !important; padding: 7px 16px !important; }
+.chartcard[data-ct="light"] ~ .side .tkrow { background: var(--panel2); }
 
 /* bottom */
 .bottom { display: flex; align-items: center; gap: 20px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
@@ -164,6 +179,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
 #msg.err { color: var(--dn); } #msg.ok { color: var(--up); }
 
 @media (max-height: 720px) {
+  .tkrow { padding: 4px 10px; } .tkrow .p { font-size: 18px; } .tk { gap: 4px; } .pill { padding: 5px 14px !important; font-size: 18px !important; } .snap > div { padding: 4px 6px; }
   .top { height: 46px; } .pxbox #px { font-size: 21px; }
   .card > .hd { padding: 6px 10px; } .card > .bd { padding: 6px 10px; }
   .lv td { padding: 3px 0; } .row { padding: 3px 0; } .bottom { padding: 6px 12px; } .stat .v { font-size: 15px; }
@@ -1264,6 +1280,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function renderSignal() {
     const m = st.tf, cur = E.S.cursor, closed = isClosed() && !st.fake, open = closed ? null : getOpen(m, cur), pill = $('#sigPill'), body = $('#sigBody');
     $('#sigTitle').textContent = 'Signal ' + E.LABEL[m];
+    const sigCard = pill.closest('.card'); sigCard.classList.remove('hot', 'sellc');
     if (closed) {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Closed'; pill.className = 'pill wait';
@@ -1273,14 +1290,15 @@ if (typeof module !== 'undefined') module.exports = Engine;
     } else if (open) {
       const s = E.statusAt(open, cur), buy = open.side === 1;
       pill.textContent = buy ? 'Buy' : 'Sell'; pill.className = 'pill ' + (buy ? 'buy' : 'sell');
+      sigCard.classList.add('hot'); sigCard.classList.toggle('sellc', !buy);
       const rows = [['Entry', open.entry, null], ['SL', s.stop, null], ['TP1', open.tp[0], 0], ['TP2', open.tp[1], 1], ['TP3', open.tp[2], 2]];
-      body.innerHTML = '<div class="score"><span class="lbl">Confluence</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
-        '<table class="lv">' + rows.map(r => {
-          const d = r[0] === 'Entry' ? '' : sgn((r[1] - open.entry) * open.side), R = r[0] === 'SL' ? (s.stop === open.sl ? '-1R' : (s.stop === open.entry ? 'BE' : '+1R')) : r[2] !== null ? '+' + (r[2] + 1) + 'R' : '';
-          const done = r[2] !== null && s.hit[r[2]];
-          return '<tr class="' + (done ? 'hit' : '') + '"><td>' + r[0] + '</td><td>' + fmt(r[1]) + '</td><td>' + d + '</td><td class="' + (r[0] === 'SL' ? 'dn' : done ? 'up' : 'mute') + '">' + (done ? 'hit' : R) + '</td></tr>';
-        }).join('') + '</table>' +
-        (open.test ? '<div class="warn" style="margin:8px 0 0">TEST SIGNAL. Made up at the current price to check the chart and alert. Press Test signal again to clear.</div>' : '') + '<div class="note" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% still running, risk $' + open.risk.toFixed(2) + '.</div>';
+      body.innerHTML = '<div class="tk">' + rows.map(r => {
+        const done = r[2] !== null && s.hit[r[2]], isSl = r[0] === 'SL', isEn = r[0] === 'Entry';
+        const d = isEn ? 'now ' + fmt(s.px) : sgn((r[1] - open.entry) * open.side) + (isSl ? (s.stop === open.sl ? ' -1R' : s.stop === open.entry ? ' BE' : ' +1R') : ' +' + (r[2] + 1) + 'R');
+        return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
+      }).join('') + '</div>' +
+        '<div class="score" style="margin:8px 0 2px"><span class="lbl">Score</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
+        (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';

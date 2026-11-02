@@ -235,7 +235,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
     <div class="stat mid"><span class="lbl">Live spot price</span><span class="v" id="mmPx">--</span><span class="s" id="mmPos"></span></div>
     <div class="stat" style="align-items:flex-end;text-align:right"><span class="lbl">Resistance (24h high)</span><span class="v dn" id="mmHi">--</span><span class="s" id="mmHiS"></span></div>
     <div class="acts">
-      <button class="btn" id="alerts" type="button">Alerts off</button>
+      <button class="btn" id="alerts" type="button">Alerts on</button>
       <button class="btn" id="testSig" type="button" title="Draws a made-up trade and fires the alert, to check they work">Test signal</button>
       <button class="btn" id="dataOpen" type="button">Data</button>
       <button class="btn solid" id="btOpen2" type="button">Backtest</button>
@@ -631,7 +631,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const fmt = (x, d) => { const n = d === undefined ? 2 : d; return x.toLocaleString('en-US', { minimumFractionDigits: n, maximumFractionDigits: n }); };
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const C = { bg: css('--bg'), line: css('--line'), fg: css('--fg'), mute: css('--mute'), gold: css('--gold'), up: css('--up'), dn: css('--dn'), blue: css('--blue'), panel: css('--panel') };
-  const st = { off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: false, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
+  const st = { off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: true, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
   const pad2 = n => String(n).padStart(2, '0');
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hm = t => { const d = new Date(t * 1000); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
@@ -642,7 +642,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
-  st.tv = ls.get('xau.tv') === '1';
+  st.tv = ls.get('xau.tv2') === '1';
   st.ct = ls.get('xau.ct') === 'light' ? 'light' : 'dark'; st.ema = ls.get('xau.ema') === '1';
   const sgn = x => (x >= 0 ? '+' : '') + x.toFixed(2);
   const sgn0 = x => (x >= 0 ? '+' : '') + Math.round(x);
@@ -953,8 +953,30 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }, 1000);
 
   /* ---------- alerts ---------- */
-  function beep() {
-    try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(a.destination); o.start(); setTimeout(() => { o.stop(); a.close(); }, 350); } catch (e) {}
+  /* Alerts are on from the start. Browsers only allow sound after one click on the page, so the first click or key press unlocks it. */
+  let actx = null, unlocked = false;
+  const hint = document.createElement('div');
+  hint.style.cssText = 'position:fixed;left:50%;top:6px;transform:translateX(-50%);z-index:50;background:#e0a23c;color:#1a1405;font:700 12px "IBM Plex Sans",sans-serif;padding:6px 12px;border-radius:4px;cursor:pointer;box-shadow:0 2px 10px #0006';
+  hint.textContent = 'Click anywhere once to switch alert sound on';
+  document.body.appendChild(hint);
+  function unlock() {
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state === 'suspended' && actx.resume) actx.resume(); } catch (e) {}
+    try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {}
+    try { if (window.speechSynthesis) speechSynthesis.getVoices(); } catch (e) {}
+    unlocked = !!actx; if (unlocked) { hint.hidden = true; ['pointerdown', 'keydown', 'touchstart'].forEach(ev => window.removeEventListener(ev, unlock, true)); }
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev => window.addEventListener(ev, unlock, true));
+  function beep(say) {
+    if (!unlocked) { hint.hidden = false; return; }
+    try {
+      const t0 = actx.currentTime + 0.02;
+      for (let n = 0; n < 8; n++) {
+        const o = actx.createOscillator(), g = actx.createGain(), a = t0 + n * 0.34;
+        o.type = 'square'; o.frequency.value = n % 2 ? 1175 : 880; g.gain.value = 1; o.connect(g); g.connect(actx.destination); o.start(a); o.stop(a + 0.26);
+      }
+    } catch (e) {}
+    try { if (say && window.speechSynthesis) { const u = new SpeechSynthesisUtterance(say); u.volume = 1; u.rate = 0.95; setTimeout(() => speechSynthesis.speak(u), 2800); } } catch (e) {}
+    try { const t = document.title; let k = 0; const iv = setInterval(() => { document.title = k++ % 2 ? t : '⚠ XAU SIGNAL'; if (k > 12) { clearInterval(iv); document.title = t; } }, 600); } catch (e) {}
   }
   /* Test signal: a made-up trade at the current price, to check the drawing and the alert. Never enters the backtest. */
   function getOpen(m, cur) {
@@ -972,7 +994,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   function cycleTest() {
     const b = $('#testSig'); if (st.seen === null) st.seen = '';
-    if (!st.fake) { makeFake(1); b.textContent = 'Test: Buy'; if (!st.alerts) $('#alerts').click(); }
+    if (!st.fake) { makeFake(1); b.textContent = 'Test: Buy'; if (!st.alerts) $('#alerts').click(); unlock(); }
     else if (st.fake.side === 1) { makeFake(-1); b.textContent = 'Test: Sell'; }
     else { st.fake = null; b.textContent = 'Test signal'; renderAll(); st.seen = null; checkAlert(); return; }
     renderAll(); checkAlert();
@@ -981,16 +1003,13 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const open = getOpen(st.tf, E.S.cursor), id = open ? st.tf + ':' + open.sigT + (open.test ? 'T' : '') : '';
     if (st.seen === null) { st.seen = id; return; }
     if (id && id !== st.seen && st.alerts) {
-      beep();
+      beep((open.test ? 'Test signal. ' : '') + 'Gold ' + (open.side === 1 ? 'buy' : 'sell') + ' signal on the ' + E.LABEL[st.tf] + ' chart');
       try { if (window.Notification && Notification.permission === 'granted') new Notification('XAUUSD ' + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[st.tf], { body: 'Entry ' + open.entry.toFixed(2) + '  SL ' + open.sl.toFixed(2) + '  TP1 ' + open.tp[0].toFixed(2) + '  TP3 ' + open.tp[2].toFixed(2) }); } catch (e) {}
     }
     st.seen = id;
   }
   $('#testSig').onclick = cycleTest;
-  $('#alerts').onclick = () => {
-    st.alerts = !st.alerts; $('#alerts').textContent = st.alerts ? 'Alerts on' : 'Alerts off';
-    if (st.alerts) { beep(); try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {} }
-  };
+  $('#alerts').onclick = () => { st.alerts = !st.alerts; $('#alerts').textContent = st.alerts ? 'Alerts on' : 'Muted'; if (st.alerts) beep(); };
 
   /* ---------- top strip ---------- */
   function sessionNow(d) {
@@ -1224,7 +1243,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const key = JSON.stringify(q); if (key === tvKey) return; tvKey = key;
     f.src = 'https://s.tradingview.com/widgetembed/?' + Object.keys(q).map(k => k + '=' + encodeURIComponent(q[k])).join('&');
   }
-  $('#bTv').onclick = () => { st.tv = !st.tv; ls.set('xau.tv', st.tv ? '1' : '0'); syncView(); if (!st.tv) renderAll(); };
+  $('#bTv').onclick = () => { st.tv = !st.tv; ls.set('xau.tv2', st.tv ? '1' : '0'); syncView(); if (!st.tv) renderAll(); };
   $('#bEma').onclick = () => { st.ema = !st.ema; ls.set('xau.ema', st.ema ? '1' : '0'); syncView(); drawChart(); };
   $('#bTheme').onclick = () => { st.ct = st.ct === 'dark' ? 'light' : 'dark'; ls.set('xau.ct', st.ct); syncView(); drawChart(); };
 

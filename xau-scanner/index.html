@@ -236,6 +236,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
     <div class="stat" style="align-items:flex-end;text-align:right"><span class="lbl">Resistance (24h high)</span><span class="v dn" id="mmHi">--</span><span class="s" id="mmHiS"></span></div>
     <div class="acts">
       <button class="btn" id="alerts" type="button">Alerts off</button>
+      <button class="btn" id="testSig" type="button" title="Draws a made-up trade and fires the alert, to check they work">Test signal</button>
       <button class="btn" id="dataOpen" type="button">Data</button>
       <button class="btn solid" id="btOpen2" type="button">Backtest</button>
     </div>
@@ -955,8 +956,29 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function beep() {
     try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(), g = a.createGain(); o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(a.destination); o.start(); setTimeout(() => { o.stop(); a.close(); }, 350); } catch (e) {}
   }
+  /* Test signal: a made-up trade at the current price, to check the drawing and the alert. Never enters the backtest. */
+  function getOpen(m, cur) {
+    const f = st.fake;
+    if (f) {
+      const tf = E.S.tfs[m]; if (!tf) return null;
+      const jj = E.lastDone(tf, cur); let k = Math.min(tf.bars.length - 1, jj + 1); while (k > 0 && tf.bars[k].t > f.t) k--;
+      return { test: true, side: f.side, entry: f.entry, sl: f.sl, tp: f.tp, risk: f.risk, score: 99, reasons: ['Test signal'], trigger: 'TEST SIGNAL (not a real trade)', sigIdx: k, sigEnd: 0, sigT: f.t, ev: [], costR: 0, exitEnd: Infinity };
+    }
+    return isClosed() ? null : E.openAt(m, cur);
+  }
+  function makeFake(side) {
+    const m = st.tf, tf = E.S.tfs[m], cur = E.S.cursor, jj = E.lastDone(tf, cur), px = E.price(), risk = Math.max(2, tf.atr[jj] * 1.2);
+    st.fake = { side: side, entry: px, risk: risk, sl: px - side * risk, tp: [1, 2, 3].map(n => px + side * n * risk), t: tf.bars[Math.max(0, jj - 3)].t };
+  }
+  function cycleTest() {
+    const b = $('#testSig'); if (st.seen === null) st.seen = '';
+    if (!st.fake) { makeFake(1); b.textContent = 'Test: Buy'; if (!st.alerts) $('#alerts').click(); }
+    else if (st.fake.side === 1) { makeFake(-1); b.textContent = 'Test: Sell'; }
+    else { st.fake = null; b.textContent = 'Test signal'; renderAll(); st.seen = null; checkAlert(); return; }
+    renderAll(); checkAlert();
+  }
   function checkAlert() {
-    const open = isClosed() ? null : E.openAt(st.tf, E.S.cursor), id = open ? st.tf + ':' + open.sigT : '';
+    const open = getOpen(st.tf, E.S.cursor), id = open ? st.tf + ':' + open.sigT + (open.test ? 'T' : '') : '';
     if (st.seen === null) { st.seen = id; return; }
     if (id && id !== st.seen && st.alerts) {
       beep();
@@ -964,6 +986,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     }
     st.seen = id;
   }
+  $('#testSig').onclick = cycleTest;
   $('#alerts').onclick = () => {
     st.alerts = !st.alerts; $('#alerts').textContent = st.alerts ? 'Alerts on' : 'Alerts off';
     if (st.alerts) { beep(); try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (e) {} }
@@ -999,7 +1022,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (S.source === 'Simulated') { banner.hidden = false; banner.textContent = st.note || 'Simulated prices. Press Data, then Reconnect.'; }
     else if (!S.live) { banner.hidden = false; banner.textContent = 'File data, not live. Last candle ' + stampL(S.base[S.base.length - 1].t) + ' ' + TZ + '.'; }
     else banner.hidden = true;
-    const m = st.tf, cur = S.cursor, items = [], open = isClosed() ? null : E.openAt(m, cur), cl = E.closedAt(m, cur).slice(-8).reverse();
+    const m = st.tf, cur = S.cursor, items = [], open = getOpen(m, cur), cl = E.closedAt(m, cur).slice(-8).reverse();
     if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">OPEN ' + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]));
     cl.forEach(t => items.push('<b class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> ' + dm(t.sigT) + ' ' + hm(t.sigT) + ' at ' + fmt(t.entry) + ' closed ' + t.exitK + ' <b class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + 'R</b>'));
     if (isClosed()) items.unshift('<b class="gold">MARKET CLOSED</b> reopens ' + openLabel() + '. Showing the last session, no new signals until then.');
@@ -1031,7 +1054,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const barAt = k => (k < 0 || k > top ? null : k <= j ? tf.bars[k] : fm);
     const bars = []; for (let k = first; k <= lastIdx; k++) { const bb = barAt(k); if (bb) bars.push(bb); }
     const k0 = Math.max(first, 0), k1 = Math.min(lastIdx, top);
-    const open = isClosed() ? null : E.openAt(m, cur), trs = E.trades(m);
+    const open = getOpen(m, cur), trs = E.trades(m);
     if (!bars.length) return;
     let lo = Infinity, hi = -Infinity; bars.forEach(b => { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; });
     if (open) { hi = Math.max(hi, open.entry, open.sl, open.tp[2]); lo = Math.min(lo, open.entry, open.sl, open.tp[2]); }
@@ -1116,6 +1139,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     // the open trade: green zone to TP3, red zone to the stop, tagged levels at the right
     if (open) {
       const s = E.statusAt(open, cur), x1 = X(open.sigIdx), x2 = plotW - 6;
+      if (open.test) { const bb = tf.bars[open.sigIdx] || fm; if (bb) { const xx = X(open.sigIdx); if (open.side === 1) pill('Buy (test)', xx, Y(bb.l) + 8, '#00bcd4', 1); else pill('Sell (test)', xx, Y(bb.h) - 8, '#e91e63', -1); } }
       const zone = (a, b2, col) => { const ya = Y(a), yb = Y(b2), gr = g.createLinearGradient(0, ya, 0, yb); gr.addColorStop(0, col + '08'); gr.addColorStop(1, col + '4d'); g.fillStyle = gr; g.fillRect(x1, Math.min(ya, yb), x2 - x1, Math.abs(yb - ya)); };
       zone(open.entry, open.tp[2], '#00c853'); zone(open.entry, open.sl, '#ff1744');
       const lines = [['TP3', open.tp[2], '#2ecc00', s.hit[2]], ['TP2', open.tp[1], '#2ecc00', s.hit[1]], ['TP1', open.tp[0], '#2ecc00', s.hit[0]], ['Entry', open.entry, '#787b86', false], ['SL', s.stop, '#ff1744', false]];
@@ -1207,7 +1231,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   /* ---------- trend overlay ---------- */
   let trendOpen = true;
   function renderTrendBox() {
-    const cur = E.S.cursor, all = E.biasAt(cur, E.S.list[0]), b = all.bias, open = isClosed() ? null : E.openAt(st.tf, cur);
+    const cur = E.S.cursor, all = E.biasAt(cur, E.S.list[0]), b = all.bias, open = getOpen(st.tf, cur);
     const cls = s => s >= 3 ? 'b2' : s > 0 ? 'b1' : s <= -3 ? 's2' : s < 0 ? 's1' : 'n0';
     const overall = b >= 20 ? ['Bullish', 'b2'] : b >= 8 ? ['Mild bull', 'b1'] : b <= -20 ? ['Bearish', 's2'] : b <= -8 ? ['Mild bear', 's1'] : ['Range', 'n0'];
     let h = '<div class="r hdr" id="tbHdr"><span>Current Position</span><span class="c ' + (open ? (open.side === 1 ? 'b2' : 's2') : 'n0') + '">' + (open ? (open.side === 1 ? 'Buy' : 'Sell') : isClosed() ? 'Closed' : 'None') + '</span></div>' +
@@ -1219,7 +1243,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
 
   /* ---------- signal card ---------- */
   function renderSignal() {
-    const m = st.tf, cur = E.S.cursor, closed = isClosed(), open = closed ? null : E.openAt(m, cur), pill = $('#sigPill'), body = $('#sigBody');
+    const m = st.tf, cur = E.S.cursor, closed = isClosed() && !st.fake, open = closed ? null : getOpen(m, cur), pill = $('#sigPill'), body = $('#sigBody');
     $('#sigTitle').textContent = 'Signal ' + E.LABEL[m];
     if (closed) {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
@@ -1237,7 +1261,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
           const done = r[2] !== null && s.hit[r[2]];
           return '<tr class="' + (done ? 'hit' : '') + '"><td>' + r[0] + '</td><td>' + fmt(r[1]) + '</td><td>' + d + '</td><td class="' + (r[0] === 'SL' ? 'dn' : done ? 'up' : 'mute') + '">' + (done ? 'hit' : R) + '</td></tr>';
         }).join('') + '</table>' +
-        '<div class="note" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% still running, risk $' + open.risk.toFixed(2) + '.</div>';
+        (open.test ? '<div class="warn" style="margin:8px 0 0">TEST SIGNAL. Made up at the current price to check the chart and alert. Press Test signal again to clear.</div>' : '') + '<div class="note" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% still running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';

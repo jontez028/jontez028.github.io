@@ -1084,8 +1084,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const plotW = w - padR, plotH = h - padB - padT, N = Math.max(25, Math.min(Math.round(plotW / 2.2), st.zoom || Math.floor(plotW / 5) - rightBars));
     const step = plotW / (N + rightBars), top = fm ? j + 1 : j;
     st.off = Math.max(-Math.floor(N * 0.6), Math.min(st.off, top - 20)); st.step = step; st.N = N;
-    const lastIdx = top - st.off, first = lastIdx - N + 1;
-    $('#toLatest').hidden = st.off <= 0;
+    if (!isFinite(st.off)) st.off = 0; const offI = Math.round(st.off), lastIdx = top - offI, first = lastIdx - N + 1;
+    $('#toLatest').hidden = offI <= 0;
     const barAt = k => (k < 0 || k > top ? null : k <= j ? tf.bars[k] : fm);
     const bars = []; for (let k = first; k <= lastIdx; k++) { const bb = barAt(k); if (bb) bars.push(bb); }
     const k0 = Math.max(first, 0), k1 = Math.min(lastIdx, top);

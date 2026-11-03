@@ -286,7 +286,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
           <h3>Live feed</h3>
           <p>Twelve Data XAU/USD through your connector. The page loads about seven weeks of 5 minute candles and 150 daily candles, then refreshes on a timer that fits your plan's daily request limit. Candle times are read as UTC.</p>
           <p class="mono" id="feedInfo" style="font-size:11.5px"></p>
-          <div id="keyBox" style="margin:0 0 10px"><label class="lbl" for="keyIn" style="display:block;margin-bottom:6px">Twelve Data API key (this browser only)</label><input id="keyIn" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key" style="width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font:500 12px var(--f-mono);margin-bottom:6px"><button class="btn" id="keySave" type="button">Save key and connect</button></div>
+          <div id="keyBox" style="margin:0 0 10px"><label class="lbl" for="keyIn" style="display:block;margin-bottom:6px">Twelve Data API key (this browser only)</label><input id="keyIn" type="password" autocomplete="off" spellcheck="false" placeholder="paste your key" style="width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font:500 12px var(--f-mono);margin-bottom:6px"><button class="btn" id="keySave" type="button">Save key and connect</button> <button class="btn" id="keyLink" type="button" title="Copies a link that sets up another device with this key. Only send it to yourself.">Copy setup link for phone</button></div>
           <button class="btn gold" id="reconnect" type="button">Reconnect</button>
         </div>
         <div>
@@ -746,6 +746,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
   /* Outside Claude: the same calls over Twelve Data's own REST API with the person's key. The key stays in this browser only. */
   const KEYN = 'xau.tdkey';
   const tdKey = () => (ls.get(KEYN) || '').trim();
+  /* A link ending in #k=KEY stores the key in this browser and then removes it from the address bar. */
+  try { const m = /[#&]k=([^&]+)/.exec(location.hash); if (m) { ls.set(KEYN, decodeURIComponent(m[1]).trim()); history.replaceState(null, '', location.pathname + location.search); } } catch (e) {}
   function restErr(j) {
     const m = String(j.message || 'Twelve Data error'), c = +j.code;
     return Object.assign(new Error(m), { code: c === 401 || c === 403 ? 'bad_key' : c === 429 ? 'rate_limit' : 'tool_error' });
@@ -1115,10 +1117,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
   setInterval(tickClock, 1000); tickClock();
   /* Background tabs get their timers throttled or frozen. When the tab wakes, fetch at once and reconnect the live ticks. */
   function wake() {
-    if (document.hidden || st.mode !== 'twelve' || !st.mcp) return;
+    if (document.hidden) return;
+    if (st.mode === 'binance' && st.hiddenAt && Date.now() - st.hiddenAt > 20000 && !st.connecting) { st.hiddenAt = 0; connectLive(); return; }
+    if (st.mode !== 'twelve' || !st.mcp) return;
     if (!st.waking || Date.now() - st.waking > 15000) { st.waking = Date.now(); startWatch(st.mcp); if (!bin.ws || bin.ws.readyState > 1) { bin.fails = 0; startOverlay(); } }
   }
-  document.addEventListener('visibilitychange', wake); window.addEventListener('focus', wake); window.addEventListener('online', wake);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) st.hiddenAt = Date.now(); else wake(); }); window.addEventListener('focus', wake); window.addEventListener('online', wake);
   /* a watchdog: if no fresh answer for three refresh periods, start the feed again */
   setInterval(() => { if (st.mode === 'twelve' && st.mcp && !document.hidden && st.lastPoll && Date.now() - st.lastPoll > Math.max(st.watchMs * 3, 240000)) { st.lastPoll = Date.now(); startWatch(st.mcp); } }, 20000);
   setInterval(() => {
@@ -1139,6 +1143,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const banner = $('#banner');
     if (S.source === 'Simulated') { banner.hidden = false; banner.textContent = st.note || 'Simulated prices. Press Data, then Reconnect.'; }
     else if (!S.live) { banner.hidden = false; banner.textContent = 'File data, not live. Last candle ' + stampL(S.base[S.base.length - 1].t) + ' ' + TZ + '.'; }
+    else if (st.mode === 'binance') { banner.hidden = false; banner.textContent = 'Not on Twelve Data, so prices and signals will differ from your other devices. Press Data and add your key.'; }
     else banner.hidden = true;
     const m = st.tf, cur = S.cursor, items = [], open = getOpen(m, cur), cl = E.closedAt(m, cur).slice(-8).reverse();
     if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">OPEN ' + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]));
@@ -1481,6 +1486,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
   });
   $('#demo').onclick = () => { closeWs(); stopWatch(); st.mode = 'demo'; st.note = 'Demo data selected. Press Data, then Reconnect to go live.'; setLive('Demo', ''); loadDemo(); msg('Showing simulated prices.', ''); };
   $('#reconnect').onclick = connectLive;
+  $('#keyLink').onclick = () => {
+    const k = tdKey(); if (!k) { msg('Save your key first, then copy the link.', 'err'); return; }
+    const u = location.origin + location.pathname + '#k=' + encodeURIComponent(k);
+    const done = () => msg('Link copied. Open it once on your phone, then delete the message you sent it in. It contains your key.', 'ok');
+    try { navigator.clipboard.writeText(u).then(done, () => msg(u, '')); } catch (e) { msg(u, ''); }
+  };
   $('#keySave').onclick = () => { const v = $('#keyIn').value.trim(); if (!v) { msg('Paste your Twelve Data API key first.', 'err'); return; } ls.set(KEYN, v); $('#keyIn').value = ''; connectLive(); };
   getMcp().then(m => { if (m) $('#keyBox').hidden = true; });
   if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe($('.chartwrap'));

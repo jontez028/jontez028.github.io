@@ -853,7 +853,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   async function tdPlan(mcp) {
     try {
       const l = tdText(await mcp.callTool(TD, 'get_api_usage', {})).trim().split('\n'), h = l[0].split(';').map(s => s.trim()), v = l[1].split(';');
-      const lim = +v[h.indexOf('plan_limit')];
+      const hd = h.indexOf('plan_daily_limit'), lim0 = hd >= 0 ? +v[hd] : +v[h.indexOf('plan_limit')], lim = lim0 >= 100 ? lim0 : 800;
       if (lim > 0) return { lim: lim, ms: Math.max(30000, Math.ceil(86400 / (lim * 0.85)) * 1000) };
     } catch (e) {}
     return { lim: 800, ms: 130000 };

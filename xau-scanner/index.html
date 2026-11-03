@@ -887,7 +887,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   /* Live ticks between Twelve Data refreshes: Binance XAUUSDT streams the forming candle, shifted by the measured gap to Twelve Data so prices line up. */
-  const bin = { ws: null, retry: null, closes: new Map(), basis: null, last: 0, timer: null };
+  const SRCS = [{ u: 'wss://fstream.binance.com/ws/xauusdt@kline_', n: 'Binance XAUUSDT' }, { u: 'wss://stream.binance.com:9443/ws/paxgusdt@kline_', n: 'Binance PAXG (gold token)' }];
+  const bin = { i: 0, opened: false, ws: null, retry: null, closes: new Map(), basis: null, last: 0, timer: null };
   function stopOverlay() {
     if (bin.retry) { clearTimeout(bin.retry); bin.retry = null; }
     if (bin.timer) { clearInterval(bin.timer); bin.timer = null; }
@@ -896,7 +897,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   function startOverlay() {
     stopOverlay(); if (st.mode !== 'twelve') return;
-    let ws; try { ws = new WebSocket('wss://fstream.binance.com/ws/xauusdt@kline_' + (st.res === 1 ? '1m' : '5m')); } catch (e) { return; }
+    let ws; bin.opened = false; st.tickSrc = SRCS[bin.i % SRCS.length].n;
+    try { ws = new WebSocket(SRCS[bin.i % SRCS.length].u + (st.res === 1 ? '1m' : '5m')); } catch (e) { return; }
     bin.ws = ws; let dirty = false;
     ws.onmessage = ev => {
       let k; try { k = JSON.parse(ev.data).k; } catch (e) { return; } if (!k) return;
@@ -913,8 +915,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
       else return;
       dirty = true;
     };
-    ws.onopen = () => { bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250); };
-    ws.onclose = () => { st.tickOn = false; st.liveT = 0; bin.fails = (bin.fails || 0) + 1; bin.retry = setTimeout(startOverlay, Math.min(60000, 3000 * bin.fails)); };
+    ws.onopen = () => { bin.opened = true; bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250); };
+    ws.onclose = () => { st.tickOn = false; st.liveT = 0; if (!bin.opened) bin.i++; bin.fails = (bin.fails || 0) + 1; bin.retry = setTimeout(startOverlay, Math.min(60000, 3000 * bin.fails)); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }
   async function connectTwelve(mcp) {
@@ -1123,7 +1125,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const el = $('#feedAge'); if (!el) return;
     if (st.mode !== 'twelve') { el.textContent = ''; return; }
     const age = st.lastPoll ? Math.round((Date.now() - st.lastPoll) / 1000) : null, nxt = st.lastPoll && st.watchMs ? Math.max(0, Math.round((st.lastPoll + st.watchMs - Date.now()) / 1000)) : null;
-    el.textContent = (st.tickOn ? 'ticks on' : 'ticks off') + (age !== null ? ' | candles ' + (age < 90 ? age + 's' : Math.round(age / 60) + 'm') + ' ago' + (nxt !== null ? ', next in ' + nxt + 's' : '') : '');
+    el.textContent = (st.tickOn ? 'ticks on (' + st.tickSrc + ')' : 'ticks off') + (age !== null ? ' | candles ' + (age < 90 ? age + 's' : Math.round(age / 60) + 'm') + ' ago' + (nxt !== null ? ', next in ' + nxt + 's' : '') : '');
     el.style.color = st.tickOn ? 'var(--up)' : 'var(--warn)';
   }, 1000);
 

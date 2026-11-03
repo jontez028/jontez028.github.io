@@ -864,6 +864,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const m = new Map(tail.map(b => [b.t, b])); let changed = false;
     rows.forEach(r => {
       if (r.t < tail[0].t) return;
+      if (st.liveT && r.t >= st.liveT) return;
       const o = m.get(r.t); if (!o || o.h !== r.h || o.l !== r.l || o.c !== r.c || o.o !== r.o) changed = true;
       m.set(r.t, r);
     });
@@ -883,6 +884,38 @@ if (typeof module !== 'undefined') module.exports = Engine;
       refreshTag();
     }, { refetchInterval: ms });
   }
+
+  /* Live ticks between Twelve Data refreshes: Binance XAUUSDT streams the forming candle, shifted by the measured gap to Twelve Data so prices line up. */
+  const bin = { ws: null, retry: null, closes: new Map(), basis: null, last: 0, timer: null };
+  function stopOverlay() {
+    if (bin.retry) { clearTimeout(bin.retry); bin.retry = null; }
+    if (bin.timer) { clearInterval(bin.timer); bin.timer = null; }
+    if (bin.ws) { bin.ws.onclose = null; try { bin.ws.close(); } catch (e) {} bin.ws = null; }
+    st.tickOn = false; st.liveT = 0; bin.basis = null; bin.closes.clear();
+  }
+  function startOverlay() {
+    stopOverlay(); if (st.mode !== 'twelve') return;
+    let ws; try { ws = new WebSocket('wss://fstream.binance.com/ws/xauusdt@kline_' + (st.res === 1 ? '1m' : '5m')); } catch (e) { return; }
+    bin.ws = ws; let dirty = false;
+    ws.onmessage = ev => {
+      let k; try { k = JSON.parse(ev.data).k; } catch (e) { return; } if (!k) return;
+      const t = k.t / 1000, c = +k.c, base = E.S.base; if (!base.length || st.mode !== 'twelve') return;
+      if (k.x) bin.closes.set(t, c);
+      // gap to Twelve Data: newest completed Twelve Data candle that Binance also closed
+      for (let i = base.length - 2; i >= Math.max(0, base.length - 40); i--) { if (bin.closes.has(base[i].t) && base[i].t < t) { bin.basis = base[i].c - bin.closes.get(base[i].t); break; } }
+      if (bin.basis === null) bin.basis = base[base.length - 1].c - c;
+      if (!marketOpen(Date.now() / 1000)) return;
+      const bar = { t: t, o: +k.o + bin.basis, h: +k.h + bin.basis, l: +k.l + bin.basis, c: c + bin.basis }, last = base[base.length - 1];
+      st.liveT = t; st.tickOn = true; st.lastTick = Date.now();
+      if (bar.t === last.t) base[base.length - 1] = bar;
+      else if (bar.t > last.t) { base.push(bar); st.dirty = true; }
+      else return;
+      dirty = true;
+    };
+    ws.onopen = () => { if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); }, 250); };
+    ws.onclose = () => { st.tickOn = false; st.liveT = 0; bin.retry = setTimeout(startOverlay, 5000); };
+    ws.onerror = () => { try { ws.close(); } catch (e) {} };
+  }
   async function connectTwelve(mcp) {
     msg('Asking Twelve Data for XAU/USD candles. You may be asked to allow this connector.', '');
     const raw = await tdHistory(mcp);
@@ -899,7 +932,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     st.lastTick = Date.now(); st.staleAfter = plan.ms * 3 + 60000; st.err = ''; st.note = '';
     E.init(res.bars, res.baseMin, curLive(res.bars), 'Live: Twelve Data XAU/USD', false, true, st.daily);
     if (st.pendTf && E.S.list.indexOf(st.pendTf) >= 0) st.tf = st.pendTf; st.pendTf = 0;
-    afterLoad(); startWatch(mcp); refreshTag();
+    afterLoad(); startWatch(mcp); refreshTag(); startOverlay();
     msg('Live from Twelve Data. ' + res.bars.length.toLocaleString('en-US') + (st.res === 1 ? ' one minute candles (about ' + Math.round(res.bars.length / 1440 * 1.4) + ' days of history, so backtests on higher timeframes use a shorter window)' : ' candles') + (st.daily ? ' plus ' + st.daily.length + ' daily candles' : ', daily trend limited') + '. ' + (tz.ok ? 'Twelve Data stamps candles in ' + tz.zone.replace('_', ' ') + ' time, converted for you.' : 'Could not check which clock Twelve Data uses, so candle times may be off.') + (marketOpen(Date.now() / 1000) ? '' : ' The market is closed, so you are seeing the last session.') + ' Refreshing every ' + Math.round(plan.ms / 1000) + ' seconds to stay inside your ' + plan.lim + ' requests a day.', tz.ok ? 'ok' : 'err');
   }
 
@@ -917,7 +950,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     }
     return all;
   }
-  function closeWs() { if (st.retry) { clearTimeout(st.retry); st.retry = null; } if (st.ws) { st.ws.onclose = null; try { st.ws.close(); } catch (e) {} st.ws = null; } }
+  function closeWs() { stopOverlay(); if (st.retry) { clearTimeout(st.retry); st.retry = null; } if (st.ws) { st.ws.onclose = null; try { st.ws.close(); } catch (e) {} st.ws = null; } }
   async function connectBinance() {
     msg('Loading the last 50 days of 5 minute candles from Binance...', '');
     const res = E.normalise(await binanceHistory());
@@ -1052,7 +1085,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     $('#px').textContent = fmt(px);
     const c = $('#chg'); c.textContent = sgn(ch) + ' (' + sgn(ch / ref * 100) + '%) 24h'; c.className = ch >= 0 ? 'up' : 'dn';
     const z = E.zones(S.cursor); $('#range24').textContent = '24h range $' + fmt(z.hi - z.lo);
-    $('#srcName').textContent = S.source + (S.live ? ' | last candle ' + hm(S.base[S.base.length - 1].t) + ' ' + TZ : '');
+    $('#srcName').textContent = S.source + (S.live ? ' | last candle ' + hm(S.base[S.base.length - 1].t) + ' ' + TZ + (st.tickOn ? ' | live ticks' : '') : '');
     const banner = $('#banner');
     if (S.source === 'Simulated') { banner.hidden = false; banner.textContent = st.note || 'Simulated prices. Press Data, then Reconnect.'; }
     else if (!S.live) { banner.hidden = false; banner.textContent = 'File data, not live. Last candle ' + stampL(S.base[S.base.length - 1].t) + ' ' + TZ + '.'; }

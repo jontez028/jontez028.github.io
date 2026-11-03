@@ -211,6 +211,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <div class="seg" id="tfSeg" role="group" aria-label="Timeframe"></div>
         <span id="live" class="livetag">Connecting</span>
         <span class="lbl" id="srcName"></span>
+        <span class="lbl" id="feedAge" style="flex:none"></span>
         <div class="seg" id="viewSeg" role="group" aria-label="Chart options" style="margin-left:auto">
           <button type="button" id="bTv" aria-pressed="false" title="Show the TradingView chart or the scanner chart with signal levels">TradingView</button>
           <button type="button" id="bEma" aria-pressed="false">EMA</button>
@@ -878,7 +879,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     st.watchMs = ms; st.mcp = mcp;
     st.unwatch = mcp.watchTool(TD, 'get_time_series', st.res === 1 ? { symbol: TD_SYM, interval: '1min', outputsize: 60 } : { symbol: TD_SYM, interval: '5min', outputsize: 48 }, ev => {
       if (ev.type === 'data') {
-        try { if (mergeRows(fixRows(tdRows(ev.result)))) st.dirty = true; st.lastTick = Date.now(); st.err = ''; }
+        try { if (mergeRows(fixRows(tdRows(ev.result)))) st.dirty = true; st.lastTick = Date.now(); st.lastPoll = Date.now(); st.err = ''; }
         catch (e) { st.err = String(e.message).slice(0, 90); }
       } else { st.err = tdMessage(ev.error); }
       refreshTag();
@@ -912,8 +913,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
       else return;
       dirty = true;
     };
-    ws.onopen = () => { if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); }, 250); };
-    ws.onclose = () => { st.tickOn = false; st.liveT = 0; bin.retry = setTimeout(startOverlay, 5000); };
+    ws.onopen = () => { bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); }, 250); };
+    ws.onclose = () => { st.tickOn = false; st.liveT = 0; bin.fails = (bin.fails || 0) + 1; bin.retry = setTimeout(startOverlay, Math.min(60000, 3000 * bin.fails)); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }
   async function connectTwelve(mcp) {
@@ -1078,6 +1079,21 @@ if (typeof module !== 'undefined') module.exports = Engine;
     refreshTag();
   }
   setInterval(tickClock, 1000); tickClock();
+  /* Background tabs get their timers throttled or frozen. When the tab wakes, fetch at once and reconnect the live ticks. */
+  function wake() {
+    if (document.hidden || st.mode !== 'twelve' || !st.mcp) return;
+    if (!st.waking || Date.now() - st.waking > 15000) { st.waking = Date.now(); startWatch(st.mcp); if (!bin.ws || bin.ws.readyState > 1) { bin.fails = 0; startOverlay(); } }
+  }
+  document.addEventListener('visibilitychange', wake); window.addEventListener('focus', wake); window.addEventListener('online', wake);
+  /* a watchdog: if no fresh answer for three refresh periods, start the feed again */
+  setInterval(() => { if (st.mode === 'twelve' && st.mcp && !document.hidden && st.lastPoll && Date.now() - st.lastPoll > Math.max(st.watchMs * 3, 240000)) { st.lastPoll = Date.now(); startWatch(st.mcp); } }, 20000);
+  setInterval(() => {
+    const el = $('#feedAge'); if (!el) return;
+    if (st.mode !== 'twelve') { el.textContent = ''; return; }
+    const age = st.lastPoll ? Math.round((Date.now() - st.lastPoll) / 1000) : null, nxt = st.lastPoll && st.watchMs ? Math.max(0, Math.round((st.lastPoll + st.watchMs - Date.now()) / 1000)) : null;
+    el.textContent = (st.tickOn ? 'ticks on' : 'ticks off') + (age !== null ? ' | candles ' + (age < 90 ? age + 's' : Math.round(age / 60) + 'm') + ' ago' + (nxt !== null ? ', next in ' + nxt + 's' : '') : '');
+    el.style.color = st.tickOn ? 'var(--up)' : 'var(--warn)';
+  }, 1000);
 
   function renderTop() {
     const S = E.S, px = E.price(), n24 = Math.round(1440 / S.baseMin), lastI = S.live ? S.base.length - 1 : S.cursor;

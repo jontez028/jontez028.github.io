@@ -913,7 +913,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       else return;
       dirty = true;
     };
-    ws.onopen = () => { bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); }, 250); };
+    ws.onopen = () => { bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250); };
     ws.onclose = () => { st.tickOn = false; st.liveT = 0; bin.fails = (bin.fails || 0) + 1; bin.retry = setTimeout(startOverlay, Math.min(60000, 3000 * bin.fails)); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }
@@ -999,7 +999,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   setInterval(() => {
     if (!st.dirty || !E.S.live) return; st.dirty = false;
     const base = E.S.base; E.init(base, E.S.baseMin, curLive(base), E.S.source, false, true, st.daily);
-    renderAll(); checkAlert();
+    renderAll(); checkAlert(); checkTargets();
   }, 1000);
 
   /* ---------- alerts ---------- */
@@ -1027,6 +1027,38 @@ if (typeof module !== 'undefined') module.exports = Engine;
     } catch (e) {}
     try { if (say && window.speechSynthesis) { const u = new SpeechSynthesisUtterance(say); u.volume = 1; u.rate = 0.95; setTimeout(() => speechSynthesis.speak(u), 2800); } } catch (e) {}
     try { const t = document.title; let k = 0; const iv = setInterval(() => { document.title = k++ % 2 ? t : '⚠ XAU SIGNAL'; if (k > 12) { clearInterval(iv); document.title = t; } }, 600); } catch (e) {}
+  }
+  /* Targets by the live price: the engine only knows candles that have closed, so the candle still forming is scanned here as well. */
+  function liveStatus(open, cur) {
+    const s = E.statusAt(open, cur), tf = E.S.tfs[st.tf], base = E.S.base; if (!tf) return s;
+    const j = E.lastDone(tf, cur), side = open.side, hit = s.hit.slice(); let stop = s.stop, rem = s.rem, R = s.R, stopped = false;
+    for (let k = Math.max(j >= 0 ? tf.bars[j].end + 1 : 0, (open.sigEnd || 0) + 1); k < base.length; k++) {
+      const b = base[k];
+      if (side === 1 ? b.l <= stop : b.h >= stop) { R += rem * ((stop - open.entry) * side / open.risk); rem = 0; stopped = true; break; }
+      for (let n = 0; n < 3; n++) {
+        if (hit[n]) continue;
+        if (side === 1 ? b.h >= open.tp[n] : b.l <= open.tp[n]) {
+          hit[n] = true; const part = n < 2 ? 1 / 3 : rem; R += part * (n + 1); rem -= part;
+          if (n === 0) stop = open.entry; if (n === 1) stop = open.tp[0];
+        } else break;
+      }
+      if (rem <= 1e-9) break;
+    }
+    const px = E.price();
+    return { R: R, rem: rem, hit: hit, stop: stop, stopped: stopped, live: R + rem * ((px - open.entry) * side / open.risk), px: px };
+  }
+  const tpSeen = {};
+  function checkTargets() {
+    if (!st.alerts) return;
+    const cur = E.S.cursor, open = E.S.live || st.fake ? getOpen(st.tf, cur) : null; if (!open) return;
+    const s = liveStatus(open, cur), key = st.tf + ':' + open.sigT + (open.test ? 'T' : ''), now = s.hit.filter(Boolean).length + (s.stopped ? 10 : 0), was = tpSeen[key];
+    tpSeen[key] = now; if (was === undefined || now <= was) return;
+    const lab = E.LABEL[st.tf], side = open.side === 1 ? 'buy' : 'sell';
+    let say, title, body;
+    if (s.stopped && was < 10) { say = 'Stop loss hit on the gold ' + side; title = 'XAUUSD ' + side.toUpperCase() + ' ' + lab + ': STOP HIT'; body = 'Stop ' + s.stop.toFixed(2) + ' touched at ' + s.px.toFixed(2); }
+    else { const n = s.hit.filter(Boolean).length; say = 'Take profit ' + n + ' reached on the gold ' + side; title = 'XAUUSD ' + side.toUpperCase() + ' ' + lab + ': TP' + n + ' HIT'; body = 'TP' + n + ' ' + open.tp[n - 1].toFixed(2) + ', price ' + s.px.toFixed(2) + (n === 1 ? '. Stop moves to entry.' : n === 2 ? '. Stop moves to TP1.' : '. Trade complete.'); }
+    beep((open.test ? 'Test. ' : '') + say);
+    try { if (window.Notification && Notification.permission === 'granted') new Notification(title, { body: body }); } catch (e) {}
   }
   /* Test signal: a made-up trade at the current price, to check the drawing and the alert. Never enters the backtest. */
   function getOpen(m, cur) {
@@ -1222,7 +1254,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     g.font = MONO; g.textBaseline = 'middle';
     // the open trade: green zone to TP3, red zone to the stop, tagged levels at the right
     if (open) {
-      const s = E.statusAt(open, cur), x1 = X(open.sigIdx), x2 = plotW - 6;
+      const s = liveStatus(open, cur), x1 = X(open.sigIdx), x2 = plotW - 6;
       if (open.test) { const bb = tf.bars[open.sigIdx] || fm; if (bb) { const xx = X(open.sigIdx); if (open.side === 1) pill('Buy (test)', xx, Y(bb.l) + 8, '#00bcd4', 1); else pill('Sell (test)', xx, Y(bb.h) - 8, '#e91e63', -1); } }
       const zone = (a, b2, col) => { const ya = Y(a), yb = Y(b2), gr = g.createLinearGradient(0, ya, 0, yb); gr.addColorStop(0, col + '08'); gr.addColorStop(1, col + '4d'); g.fillStyle = gr; g.fillRect(x1, Math.min(ya, yb), x2 - x1, Math.abs(yb - ya)); };
       zone(open.entry, open.tp[2], '#00c853'); zone(open.entry, open.sl, '#ff1744');
@@ -1291,7 +1323,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     else if (isClosed()) h = '<b class="gold">Market closed.</b> Reopens ' + openLabel() + '. No signals until then.';
     else {
       const open = E.openAt(m, cur);
-      if (open) { const s = E.statusAt(open, cur), buy = open.side === 1;
+      if (open) { const s = liveStatus(open, cur), buy = open.side === 1;
         h = '<b class="' + (buy ? 'up' : 'dn') + '">' + (buy ? 'BUY' : 'SELL') + ' ' + lab + '</b> entry ' + f(open.entry) + ' &nbsp;SL <span class="dn">' + f(s.stop) + '</span> &nbsp;TP1 <span class="up">' + f(open.tp[0]) + (s.hit[0] ? ' &#10003;' : '') + '</span> &nbsp;TP2 <span class="up">' + f(open.tp[1]) + (s.hit[1] ? ' &#10003;' : '') + '</span> &nbsp;TP3 <span class="up">' + f(open.tp[2]) + (s.hit[2] ? ' &#10003;' : '') + '</span> &nbsp;<span class="mute">score ' + open.score + '</span>'; }
       else { const b = E.biasAt(cur, m).bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
         h = '<b>No signal on ' + lab + '.</b> <span class="mute">Bias ' + sgn0(b) + (Math.abs(b) < E.P.biasMin ? ', timeframes disagree' : ', waiting for a pullback or breakout') + (last ? '. Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + f(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) : '') + '</span>'; }
@@ -1337,12 +1369,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
         '<div class="score" style="margin-top:8px"><span class="lbl">Bias</span><div class="bar"><i style="width:' + Math.min(100, Math.abs(b)) + '%;background:' + (b >= 0 ? C.up : C.dn) + '"></i></div><span class="num">' + sgn0(b) + '</span></div>' +
         (last ? '<div class="note">Last signal: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
     } else if (open) {
-      const s = E.statusAt(open, cur), buy = open.side === 1;
+      const s = liveStatus(open, cur), buy = open.side === 1;
       pill.textContent = buy ? 'Buy' : 'Sell'; pill.className = 'pill ' + (buy ? 'buy' : 'sell');
       sigCard.classList.add('hot'); sigCard.classList.toggle('sellc', !buy);
       const rows = [['Entry', open.entry, null], ['SL', s.stop, null], ['TP1', open.tp[0], 0], ['TP2', open.tp[1], 1], ['TP3', open.tp[2], 2]];
       body.innerHTML = '<div class="tk">' + rows.map(r => {
-        const done = r[2] !== null && s.hit[r[2]], isSl = r[0] === 'SL', isEn = r[0] === 'Entry';
+        const isSl = r[0] === 'SL', isEn = r[0] === 'Entry', done = (r[2] !== null && s.hit[r[2]]) || (isSl && s.stopped);
         const d = isEn ? 'now ' + fmt(s.px) : sgn((r[1] - open.entry) * open.side) + (isSl ? (s.stop === open.sl ? ' -1R' : s.stop === open.entry ? ' BE' : ' +1R') : ' +' + (r[2] + 1) + 'R');
         return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
       }).join('') + '</div>' +

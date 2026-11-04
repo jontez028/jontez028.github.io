@@ -304,7 +304,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
 <script>
 /* XAU Scanner engine: data, indicators, multi-timeframe trend, signals, backtest.
    All indicator arrays are causal. Higher-timeframe reads only use completed bars. */
-const Engine = (function () {
+const makeEngine = function () {
   const TFS = [1, 5, 15, 30, 60, 120, 240, 480, 1440];
   const LABEL = { 1: '1m', 5: '5m', 15: '15m', 30: '30m', 60: '1H', 120: '2H', 240: '4H', 480: '8H', 1440: '1D' };
   const W = { 1: 0.6, 5: 1, 15: 1.5, 30: 2, 60: 3, 120: 3.5, 240: 4, 480: 4.5, 1440: 5 };
@@ -670,7 +670,8 @@ const Engine = (function () {
   }
 
   return { S: S, P: P, TFS: TFS, LABEL: LABEL, genSim: genSim, parseCSV: parseCSV, normalise: normalise, init: init, lastDone: lastDone, trendScore: trendScore, trendLabel: trendLabel, biasAt: biasAt, evalSignal: evalSignal, trades: trades, closedAt: closedAt, openAt: openAt, statusAt: statusAt, stats: stats, zones: zones, forming: forming, price: price, isTrading: isTrading };
-})();
+};
+const Engine = makeEngine();
 if (typeof module !== 'undefined') module.exports = Engine;
 
 </script>
@@ -680,7 +681,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const fmt = (x, d) => { const n = d === undefined ? 2 : d; return x.toLocaleString('en-US', { minimumFractionDigits: n, maximumFractionDigits: n }); };
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const C = { bg: css('--bg'), line: css('--line'), fg: css('--fg'), mute: css('--mute'), gold: css('--gold'), up: css('--up'), dn: css('--dn'), blue: css('--blue'), panel: css('--panel') };
-  const st = { off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: true, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
+  const st = { early: {}, off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: true, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
   const pad2 = n => String(n).padStart(2, '0');
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hm = t => { const d = new Date(t * 1000); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
@@ -691,7 +692,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
-  st.tv = ls.get('xau.tv2') === '1';
+  st.tv = ls.get('xau.tv3') === null ? !(window.claude && window.claude.use) : ls.get('xau.tv3') === '1';
   st.ct = ls.get('xau.ct') === 'light' ? 'light' : 'dark'; st.ema = ls.get('xau.ema') === '1';
   const sgn = x => (x >= 0 ? '+' : '') + x.toFixed(2);
   const sgn0 = x => (x >= 0 ? '+' : '') + Math.round(x);
@@ -1066,6 +1067,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   /* Targets by the live price: the engine only knows candles that have closed, so the candle still forming is scanned here as well. */
   function liveStatus(open, cur) {
+    if (open.early) return { R: 0, rem: 1, hit: [false, false, false], stop: open.sl, stopped: false, live: 0, px: E.price() };
     const s = E.statusAt(open, cur), tf = E.S.tfs[st.tf], base = E.S.base; if (!tf) return s;
     const j = E.lastDone(tf, cur), side = open.side, hit = s.hit.slice(); let stop = s.stop, rem = s.rem, R = s.R, stopped = false;
     for (let k = Math.max(j >= 0 ? tf.bars[j].end + 1 : 0, (open.sigEnd || 0) + 1); k < base.length; k++) {
@@ -1087,6 +1089,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function checkTargets() {
     if (!st.alerts) return;
     const cur = E.S.cursor, open = E.S.live || st.fake ? getOpen(st.tf, cur) : null; if (!open) return;
+    if (open.early) return;
     const s = liveStatus(open, cur), key = st.tf + ':' + open.sigT + (open.test ? 'T' : ''), now = s.hit.filter(Boolean).length + (s.stopped ? 10 : 0), was = tpSeen[key];
     tpSeen[key] = now; if (was === undefined || now <= was) return;
     const lab = E.LABEL[st.tf], side = open.side === 1 ? 'buy' : 'sell';
@@ -1096,6 +1099,34 @@ if (typeof module !== 'undefined') module.exports = Engine;
     beep((open.test ? 'Test. ' : '') + say);
     try { if (window.Notification && Notification.permission === 'granted') new Notification(title, { body: body }); } catch (e) {}
   }
+
+  /* Early scan: every second or two, every timeframe is read as if its forming candle closed now. A hit is an EARLY signal. It can still vanish before the close. */
+  const EN = makeEngine(), earlySeen = {}; let scanReady = false;
+  function scanEarly() {
+    if (!E.S.live || (st.mode !== 'twelve' && st.mode !== 'binance') || isClosed() || E.S.base.length < 600) { st.early = {}; return; }
+    const base = E.S.base, now = Date.now() / 1000, next = {};
+    try { EN.init(base, E.S.baseMin, base.length - 1, 'scan', false, false, st.daily); } catch (e) { return; }
+    EN.S.list.forEach(m => {
+      if (m > 240) return;
+      const tf = EN.S.tfs[m], i = tf.bars.length - 1, bar = tf.bars[i];
+      if (i < 60 || now - bar.t < (m <= 5 ? 0.6 : m <= 30 ? 0.75 : 0.85) * m * 60) return;   // wait until most of the candle has formed: early reads on a thin candle are mostly false
+      if (E.openAt(m, E.S.cursor)) return;                         // a confirmed trade is already running here
+      const sig = EN.evalSignal(tf, i, base.length - 1); if (!sig) return;
+      const old = st.early[m], same = old && old.barT === bar.t && old.sig.side === sig.side;
+      next[m] = same ? old : { sig: sig, barT: bar.t, at: Date.now() };
+      const key = m + ':' + bar.t + ':' + sig.side;
+      if (!earlySeen[key]) {
+        earlySeen[key] = 1;
+        if (scanReady && st.alerts) {
+          const lab = E.LABEL[m], side = sig.side === 1 ? 'buy' : 'sell';
+          beep('Early ' + side + ' signal on the ' + lab + ' chart');
+          try { if (window.Notification && Notification.permission === 'granted') new Notification('XAUUSD EARLY ' + side.toUpperCase() + ' ' + lab, { body: 'Entry ' + sig.entry.toFixed(2) + '  SL ' + sig.sl.toFixed(2) + '  TP1 ' + sig.tp[0].toFixed(2) + '  TP3 ' + sig.tp[2].toFixed(2) + '. Candle still forming.' }); } catch (e) {}
+        }
+      }
+    });
+    scanReady = true; st.early = next; st.dirtyEarly = true;
+  }
+  setInterval(() => { scanEarly(); if (st.dirtyEarly) { st.dirtyEarly = false; renderSignal(); renderTrendBox(); if (!st.tv) drawChart(); tvSig(); } }, 1500);
   /* Test signal: a made-up trade at the current price, to check the drawing and the alert. Never enters the backtest. */
   function getOpen(m, cur) {
     const f = st.fake;
@@ -1104,7 +1135,13 @@ if (typeof module !== 'undefined') module.exports = Engine;
       const jj = E.lastDone(tf, cur); let k = Math.min(tf.bars.length - 1, jj + 1); while (k > 0 && tf.bars[k].t > f.t) k--;
       return { test: true, side: f.side, entry: f.entry, sl: f.sl, tp: f.tp, risk: f.risk, score: 99, reasons: ['Test signal'], trigger: 'TEST SIGNAL (not a real trade)', sigIdx: k, sigEnd: 0, sigT: f.t, ev: [], costR: 0, exitEnd: Infinity };
     }
-    return isClosed() ? null : E.openAt(m, cur);
+    const real = isClosed() ? null : E.openAt(m, cur); if (real) return real;
+    const e = !isClosed() && st.early[m];
+    if (e) {
+      const tf = E.S.tfs[m]; if (!tf) return null; const sg = e.sig;
+      return { early: true, side: sg.side, entry: sg.entry, sl: sg.sl, tp: sg.tp, risk: sg.risk, score: sg.score, reasons: sg.reasons, trigger: 'EARLY ' + sg.trigger, counter: sg.counter, lt: sg.lt, sigIdx: E.lastDone(tf, cur) + 1, sigEnd: 0, sigT: e.barT, ev: [], costR: 0, exitEnd: Infinity };
+    }
+    return null;
   }
   function makeFake(side) {
     const m = st.tf, tf = E.S.tfs[m], cur = E.S.cursor, jj = E.lastDone(tf, cur), px = E.price(), risk = Math.max(2, tf.atr[jj] * 1.2);
@@ -1118,7 +1155,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     renderAll(); checkAlert();
   }
   function checkAlert() {
-    const open = getOpen(st.tf, E.S.cursor), id = open ? st.tf + ':' + open.sigT + (open.test ? 'T' : '') : '';
+    const open0 = getOpen(st.tf, E.S.cursor), open = open0 && open0.early ? null : open0, id = open ? st.tf + ':' + open.sigT + (open.test ? 'T' : '') : '';
     if (st.seen === null) { st.seen = id; return; }
     if (id && id !== st.seen && st.alerts) {
       beep((open.test ? 'Test signal. ' : '') + 'Gold ' + (open.side === 1 ? 'buy' : 'sell') + ' signal on the ' + E.LABEL[st.tf] + ' chart');
@@ -1178,7 +1215,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     else if (st.mode === 'binance') { banner.hidden = false; banner.textContent = 'Not on Twelve Data, so prices and signals will differ from your other devices. Press Data and add your key.'; }
     else banner.hidden = true;
     const m = st.tf, cur = S.cursor, items = [], open = getOpen(m, cur), cl = E.closedAt(m, cur).slice(-8).reverse();
-    if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">OPEN ' + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]));
+    if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">' + (open.early ? 'EARLY ' : 'OPEN ') + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]));
     cl.forEach(t => items.push('<b class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> ' + dm(t.sigT) + ' ' + hm(t.sigT) + ' at ' + fmt(t.entry) + ' closed ' + t.exitK + ' <b class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + 'R</b>'));
     if (isClosed()) items.unshift('<b class="gold">MARKET CLOSED</b> reopens ' + openLabel() + '. Showing the last session, no new signals until then.');
     if (!items.length) items.push('No signals yet on ' + E.LABEL[m] + '. The scanner is watching.');
@@ -1294,7 +1331,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     // the open trade: green zone to TP3, red zone to the stop, tagged levels at the right
     if (open) {
       const s = liveStatus(open, cur), x1 = X(open.sigIdx), x2 = plotW - 6;
-      if (open.test) { const bb = tf.bars[open.sigIdx] || fm; if (bb) { const xx = X(open.sigIdx); if (open.side === 1) pill('Buy (test)', xx, Y(bb.l) + 8, '#00bcd4', 1); else pill('Sell (test)', xx, Y(bb.h) - 8, '#e91e63', -1); } }
+      if (open.test || open.early) { const bb = tf.bars[open.sigIdx] || fm, tg = open.test ? ' (test)' : ' (early)'; if (bb) { const xx = X(open.sigIdx); if (open.side === 1) pill('Buy' + tg, xx, Y(bb.l) + 8, '#00bcd4', 1); else pill('Sell' + tg, xx, Y(bb.h) - 8, '#e91e63', -1); } }
       const zone = (a, b2, col) => { const ya = Y(a), yb = Y(b2), gr = g.createLinearGradient(0, ya, 0, yb); gr.addColorStop(0, col + '08'); gr.addColorStop(1, col + '4d'); g.fillStyle = gr; g.fillRect(x1, Math.min(ya, yb), x2 - x1, Math.abs(yb - ya)); };
       zone(open.entry, open.tp[2], '#00c853'); zone(open.entry, open.sl, '#ff1744');
       const lines = [['TP3', open.tp[2], '#2ecc00', s.hit[2]], ['TP2', open.tp[1], '#2ecc00', s.hit[1]], ['TP1', open.tp[0], '#2ecc00', s.hit[0]], ['Entry', open.entry, '#787b86', false], ['SL', s.stop, '#ff1744', false]];
@@ -1361,9 +1398,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (!E.S.live) h = '<b class="dn">No live data.</b> ' + (st.mode === 'demo' || E.S.source === 'Simulated' ? 'Press Data and add your Twelve Data API key, then these signals are real.' : 'File data only.');
     else if (isClosed()) h = '<b class="gold">Market closed.</b> Reopens ' + openLabel() + '. No signals until then.';
     else {
-      const open = E.openAt(m, cur);
+      const open = getOpen(m, cur);
       if (open) { const s = liveStatus(open, cur), buy = open.side === 1;
-        h = '<b class="' + (buy ? 'up' : 'dn') + '">' + (buy ? 'BUY' : 'SELL') + ' ' + lab + '</b> entry ' + f(open.entry) + ' &nbsp;SL <span class="dn">' + f(s.stop) + '</span> &nbsp;TP1 <span class="up">' + f(open.tp[0]) + (s.hit[0] ? ' &#10003;' : '') + '</span> &nbsp;TP2 <span class="up">' + f(open.tp[1]) + (s.hit[1] ? ' &#10003;' : '') + '</span> &nbsp;TP3 <span class="up">' + f(open.tp[2]) + (s.hit[2] ? ' &#10003;' : '') + '</span> &nbsp;<span class="mute">score ' + open.score + '</span>'; }
+        h = '<b class="' + (buy ? 'up' : 'dn') + '">' + (open.early ? 'EARLY ' : '') + (buy ? 'BUY' : 'SELL') + ' ' + lab + '</b> entry ' + f(open.entry) + ' &nbsp;SL <span class="dn">' + f(s.stop) + '</span> &nbsp;TP1 <span class="up">' + f(open.tp[0]) + (s.hit[0] ? ' &#10003;' : '') + '</span> &nbsp;TP2 <span class="up">' + f(open.tp[1]) + (s.hit[1] ? ' &#10003;' : '') + '</span> &nbsp;TP3 <span class="up">' + f(open.tp[2]) + (s.hit[2] ? ' &#10003;' : '') + '</span> &nbsp;<span class="mute">score ' + open.score + '</span>'; }
       else { const b = E.biasAt(cur, m).bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
         h = '<b>No signal on ' + lab + '.</b> <span class="mute">Bias ' + sgn0(b) + (Math.abs(b) < E.P.biasMin ? ', timeframes disagree' : ', waiting for a pullback or breakout') + (last ? '. Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + f(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) : '') + '</span>'; }
     }
@@ -1379,7 +1416,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const key = JSON.stringify(q); if (key === tvKey) return; tvKey = key;
     f.src = 'https://s.tradingview.com/widgetembed/?' + Object.keys(q).map(k => k + '=' + encodeURIComponent(q[k])).join('&');
   }
-  $('#bTv').onclick = () => { st.tv = !st.tv; ls.set('xau.tv2', st.tv ? '1' : '0'); syncView(); if (!st.tv) renderAll(); };
+  $('#bTv').onclick = () => { st.tv = !st.tv; ls.set('xau.tv3', st.tv ? '1' : '0'); syncView(); if (!st.tv) renderAll(); };
   $('#bEma').onclick = () => { st.ema = !st.ema; ls.set('xau.ema', st.ema ? '1' : '0'); syncView(); drawChart(); };
   $('#bTheme').onclick = () => { st.ct = st.ct === 'dark' ? 'light' : 'dark'; ls.set('xau.ct', st.ct); syncView(); drawChart(); };
 
@@ -1397,7 +1434,16 @@ if (typeof module !== 'undefined') module.exports = Engine;
   $('#trendbox').addEventListener('click', e => { if (e.target.closest('#tbHdr')) { trendOpen = !trendOpen; renderTrendBox(); } });
 
   /* ---------- signal card ---------- */
-  function renderSignal() {
+  function radar() {
+    const bits = [];
+    E.S.list.filter(m => m <= 240).forEach(m => {
+      const o = getOpen(m, E.S.cursor); if (!o || o.test) return;
+      bits.push('<span class="' + (o.side === 1 ? 'up' : 'dn') + '" style="white-space:nowrap">' + E.LABEL[m] + ' ' + (o.side === 1 ? 'Buy' : 'Sell') + (o.early ? ' (early)' : '') + '</span>');
+    });
+    return '<div class="note" style="margin-top:6px"><b class="lbl" style="margin-right:6px">All timeframes</b>' + (bits.length ? bits.join(' &middot; ') : 'no signal right now, still scanning') + '</div>';
+  }
+  function renderSignal() { renderSignalCore(); $('#sigBody').insertAdjacentHTML('beforeend', radar()); }
+  function renderSignalCore() {
     const m = st.tf, cur = E.S.cursor, closed = isClosed() && !st.fake, open = closed ? null : getOpen(m, cur), pill = $('#sigPill'), body = $('#sigBody');
     $('#sigTitle').textContent = 'Signal ' + E.LABEL[m];
     const sigCard = pill.closest('.card'); sigCard.classList.remove('hot', 'sellc');
@@ -1409,7 +1455,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
         (last ? '<div class="note">Last signal: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
     } else if (open) {
       const s = liveStatus(open, cur), buy = open.side === 1;
-      pill.textContent = buy ? 'Buy' : 'Sell'; pill.className = 'pill ' + (buy ? 'buy' : 'sell');
+      pill.textContent = (open.early ? 'Early ' : '') + (buy ? 'Buy' : 'Sell'); pill.className = 'pill ' + (buy ? 'buy' : 'sell');
       sigCard.classList.add('hot'); sigCard.classList.toggle('sellc', !buy);
       const rows = [['Entry', open.entry, null], ['SL', s.stop, null], ['TP1', open.tp[0], 0], ['TP2', open.tp[1], 1], ['TP3', open.tp[2], 2]];
       body.innerHTML = '<div class="tk">' + rows.map(r => {
@@ -1418,7 +1464,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
         return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
       }).join('') + '</div>' +
         '<div class="score" style="margin:8px 0 2px"><span class="lbl">Score</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
-        (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
+        (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';

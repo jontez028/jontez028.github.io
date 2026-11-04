@@ -272,7 +272,9 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <div><div class="lbl" style="margin-bottom:8px">Recent trades</div><div class="tblwrap"><table class="t" id="trades"></table></div></div>
       </div>
       <div class="tblwrap" style="margin-top:12px"><table class="t" id="split"></table></div>
-      <p class="assump">Method: there are three kinds of signal. Trend signals need the weighted multi-timeframe bias to reach 30 in one direction, then a 20 EMA pullback or a 20-bar breakout, then a confluence score of 55 or more. Short-term signals (marked *) use only the timeframes from the chart up to 16 times higher when the full bias is mixed, and need a bias of 30 and a score of 60. Counter-trend reversals (marked *, 15m and above) fire against the bigger trend when price sweeps the 20-bar high or low, closes back with a long wick and RSI is stretched, and need a score of 70. Entry is a limit order at the signal bar close and must trade on the next bar. The stop sits beyond the last six-bar swing, limited to 0.8 to 2.5 ATR. A third of the position exits at each of 1R, 2R and 3R. The stop moves to entry after TP1 and to TP1 after TP2. Costs are $0.30 per ounce. When a bar touches both stop and target, the stop counts first. Open trades exit at the close after 48 bars.</p>
+      <div class="lbl" style="margin:14px 0 6px">Strategy scoreboard (real gold data, 15m to 4H, costs included)</div><div class="tblwrap"><table class="t" id="board"></table></div>
+      <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
+      <p class="assump">Method: a router reads ADX(14). Below 20 the market counts as ranging and the mean reversion group runs (RSI(2), Bollinger fade, day-average reversion, range fade) with sweeps and divergence. At 25 or more it counts as trending and the order block, EMA pullback, breakout retest and Fibonacci setups run. Between 20 and 25 the sweep, divergence, spike fade, opening range, Fibonacci and EMA setups run. Each setup needs 3 of 5 confluence points (4H bias, 1H structure, key level or gap, momentum, clean candle) and must fall between 07:30 and 17:00 UTC. The short-term and counter-trend signals from before are kept. Entry is a limit order at the signal bar close and must trade on the next bar. A third exits at each of TP1, TP2 and TP3 priced from the strategy rules, the stop moves to entry after TP1 and to TP1 after TP2, costs are $0.30 per ounce, the stop counts first when a bar touches both, and trades time out after the strategy time limit. No news calendar is connected, so the news blackout is not applied and the spike fade is a pattern rule. Day average uses typical price without volume.</p>
     </div>
   </div>
 </div>
@@ -308,7 +310,7 @@ const makeEngine = function () {
   const TFS = [1, 5, 15, 30, 60, 120, 240, 480, 1440];
   const LABEL = { 1: '1m', 5: '5m', 15: '15m', 30: '30m', 60: '1H', 120: '2H', 240: '4H', 480: '8H', 1440: '1D' };
   const W = { 1: 0.6, 5: 1, 15: 1.5, 30: 2, 60: 3, 120: 3.5, 240: 4, 480: 4.5, 1440: 5 };
-  const P = { minRisk: 2.0, cost: 0.30, maxBars: 48, thresh: 55, biasMin: 30, slMin: 0.8, slMax: 2.5, lt: 1, revMin: 15, ltMul: 16, ltBias: 30, ltThresh: 60, rev: 1, revThresh: 70, revRsi: 35 };
+  const P = { minRisk: 2.0, cost: 0.30, maxBars: 48, thresh: 55, biasMin: 30, slMin: 0.8, slMax: 2.5, lt: 1, revMin: 15, ltMul: 16, ltBias: 30, ltThresh: 60, rev: 1, revThresh: 70, revRsi: 35, only: null, router: 1, minConf: 3, sess: 1 };
   const S = { base: [], baseMin: 5, list: [], tfs: {}, bt: {}, cursor: 0, startCursor: 0, hasFuture: false, source: 'Simulated', warm: 0, live: false };
 
   /* ---------- helpers ---------- */
@@ -452,6 +454,34 @@ const makeEngine = function () {
     const firstFrom = t => { let lo = 0, hi = n; while (lo < hi) { const mid = (lo + hi) >> 1; if (base[mid].t >= t) hi = mid; else lo = mid + 1; } return lo; };
     return rows.map(r => { const endT = r.t + sec; return { t: r.t, o: r.o, h: r.h, l: r.l, c: r.c, start: firstFrom(r.t), end: endT <= lastT ? lastBefore(endT) : n + 1e9 }; });
   }
+  function sma(v, p) { const o = new Array(v.length).fill(NaN); let s = 0; for (let i = 0; i < v.length; i++) { s += v[i]; if (i >= p) s -= v[i - p]; if (i >= p - 1) o[i] = s / p; } return o; }
+  function adxCalc(b, p) {
+    const n = b.length, o = new Array(n).fill(NaN); if (n < 2 * p + 2) return o; let tr = 0, pd = 0, md = 0; const dx = [];
+    for (let i = 1; i < n; i++) {
+      const up = b[i].h - b[i - 1].h, dn = b[i - 1].l - b[i].l, t = Math.max(b[i].h - b[i].l, Math.abs(b[i].h - b[i - 1].c), Math.abs(b[i].l - b[i - 1].c));
+      const P1 = up > dn && up > 0 ? up : 0, M1 = dn > up && dn > 0 ? dn : 0;
+      if (i <= p) { tr += t; pd += P1; md += M1; } else { tr = tr - tr / p + t; pd = pd - pd / p + P1; md = md - md / p + M1; }
+      if (i >= p) { const pi = tr ? 100 * pd / tr : 0, mi = tr ? 100 * md / tr : 0; dx[i] = pi + mi ? 100 * Math.abs(pi - mi) / (pi + mi) : 0; }
+    }
+    let a = 0; for (let i = p; i < 2 * p; i++) a += dx[i]; a /= p; o[2 * p - 1] = a;
+    for (let i = 2 * p; i < n; i++) { a = (a * (p - 1) + dx[i]) / p; o[i] = a; }
+    return o;
+  }
+  function extras(bars) {
+    const n = bars.length, c = bars.map(b => b.c), s20 = sma(c, 20), bbu = new Array(n).fill(NaN), bbd = new Array(n).fill(NaN);
+    for (let i = 19; i < n; i++) { let v = 0; for (let k = i - 19; k <= i; k++) v += (c[k] - s20[i]) * (c[k] - s20[i]); const sd = Math.sqrt(v / 20); bbu[i] = s20[i] + 2 * sd; bbd[i] = s20[i] - 2 * sd; }
+    const vw = new Array(n).fill(NaN), vsd = new Array(n).fill(NaN), vn = new Array(n).fill(0), pdh = new Array(n).fill(NaN), pdl = new Array(n).fill(NaN), ash = new Array(n).fill(NaN), asl = new Array(n).fill(NaN);
+    let day = -1, sum = 0, sq = 0, cnt = 0, dh = -Infinity, dl = Infinity, ph = NaN, pl = NaN, ah = -Infinity, al = Infinity;
+    for (let i = 0; i < n; i++) {
+      const b = bars[i], d = Math.floor(b.t / 86400), hr = (b.t % 86400) / 3600;
+      if (d !== day) { if (day >= 0 && cnt) { ph = dh; pl = dl; } day = d; sum = 0; sq = 0; cnt = 0; dh = -Infinity; dl = Infinity; ah = -Infinity; al = Infinity; }
+      const tp = (b.h + b.l + b.c) / 3; sum += tp; sq += tp * tp; cnt++; if (b.h > dh) dh = b.h; if (b.l < dl) dl = b.l;
+      if (hr < 7) { if (b.h > ah) ah = b.h; if (b.l < al) al = b.l; }
+      vw[i] = sum / cnt; vsd[i] = cnt > 1 ? Math.sqrt(Math.max(0, sq / cnt - vw[i] * vw[i])) : NaN; vn[i] = cnt; pdh[i] = ph; pdl[i] = pl;
+      if (hr >= 7 && ah > -Infinity) { ash[i] = ah; asl[i] = al; }
+    }
+    return { sma5: sma(c, 5), sma200: sma(c, 200), rsi2: rsi(c, 2), bbm: s20, bbu: bbu, bbd: bbd, adx: adxCalc(bars, 14), vw: vw, vsd: vsd, vn: vn, pdh: pdh, pdl: pdl, ash: ash, asl: asl };
+  }
   function buildTF(m, ext) {
     const bars = ext || resample(S.base, m, S.baseMin), c = bars.map(b => b.c);
     const e12 = ema(c, 12), e26 = ema(c, 26), macd = e12.map((x, i) => x - e26[i]), sg = ema(macd, 9);
@@ -461,7 +491,7 @@ const makeEngine = function () {
       for (let k = Math.max(0, i - 20); k < i; k++) { if (bars[k].h > H) H = bars[k].h; if (bars[k].l < L) L = bars[k].l; }
       hh[i] = H; ll[i] = L;
     }
-    return { m: m, bars: bars, e20: ema(c, 20), e50: ema(c, 50), rsi: rsi(c, 14), atr: atr(bars, 14), mh: macd.map((x, i) => x - sg[i]), hh: hh, ll: ll };
+    return Object.assign({ m: m, bars: bars, e20: ema(c, 20), e50: ema(c, 50), rsi: rsi(c, 14), atr: atr(bars, 14), mh: macd.map((x, i) => x - sg[i]), hh: hh, ll: ll }, extras(bars));
   }
 
   function init(bars, baseMin, cursor, source, hasFuture, live, daily) {
@@ -496,18 +526,28 @@ const makeEngine = function () {
   }
 
   /* ---------- signal ---------- */
+  const GROUPS = { range: ['rsi2', 'bb', 'vwap', 'range', 'sweep', 'div', 'rev'], neutral: ['sweep', 'div', 'news', 'orb', 'fib', 'ema', 'lt', 'rev'], trend: ['ob', 'ema', 'brk', 'fib', 'orb', 'lt', 'sweep'] };
+  P.enabled = null; // null = every strategy allowed
+  function runStrat(id, tf, i, cur) {
+    const sig = STRAT_FN[id](tf, i, cur); if (!sig) return null;
+    sig.strat = id; sig.maxBars = sig.maxBars || SID[id].maxBars;
+    if (id !== 'ema' && id !== 'lt' && id !== 'rev') {
+      const c = confluence(tf, i, cur, sig); sig.conf = c.pts; sig.score = Math.min(99, 45 + c.pts * 10);
+      if (fvgNear(tf, i, sig.side)) { sig.score = Math.min(99, sig.score + 5); sig.reasons.push('Fair value gap nearby'); }
+      sig.reasons = sig.reasons.concat(c.why);
+    } else sig.conf = null;
+    if (P.minConf && sig.conf !== null && sig.conf < P.minConf) return null;
+    return sig;
+  }
   function evalSignal(tf, i, cur) {
     if (i < 60) return null;
-    const bi = biasAt(cur, tf.m); let bias = bi.bias;
-    let side = bias >= P.biasMin ? 1 : bias <= -P.biasMin ? -1 : 0, lt = false;
-    const fullSide = side;
-    if (!side && P.lt) {
-      const b2 = biasAt(cur, tf.m, tf.m * P.ltMul).bias;
-      if (Math.abs(b2) >= P.ltBias) { side = b2 > 0 ? 1 : -1; bias = b2; lt = true; }
+    if (P.sess) { const h = hourOf(tf.bars[i].t); if (h < 7.5 || h >= 17) return null; }
+    const ids = P.only ? P.only : (P.router ? GROUPS[regimeOf(tf, i)] : STRATS.map(s => s.id));
+    for (const id of ids) {
+      if (!P.only && P.enabled && P.enabled.indexOf(id) < 0) continue;
+      const s = runStrat(id, tf, i, cur); if (s) return s;
     }
-    let sig = side ? trendSig(tf, i, side, bias, lt) : null;
-    if (!sig && P.rev) sig = reversalSig(tf, i, fullSide);
-    return sig;
+    return null;
   }
   /* A bounce against the bigger trend: a sweep of the 20-bar extreme that closes back with a long wick and an RSI stretched the other way. */
   function reversalSig(tf, i, fullSide) {
@@ -567,6 +607,222 @@ const makeEngine = function () {
     return { side: side, score: score, entry: entry, sl: sl, tp: tp, risk: risk, atr: a, bias: bias, reasons: reasons, trigger: (lt ? 'Short-term ' : '') + (pull && brk ? 'pullback + breakout' : pull ? 'EMA pullback' : 'breakout'), lt: lt };
   }
 
+
+  /* ================= STRATEGY LIBRARY =================
+     Each strategy reads closed candles only and returns a signal with entry, stop and three target prices.
+     A router picks the strategies that suit the market regime (ADX), and a confluence score filters the setups. */
+  const STRATS = [
+    { id: 'rsi2', n: 'RSI(2) pullback', g: 'A', maxBars: 12 },
+    { id: 'bb', n: 'Bollinger range fade', g: 'A', maxBars: 16 },
+    { id: 'vwap', n: 'VWAP deviation reversion', g: 'A', maxBars: 24 },
+    { id: 'range', n: 'Range support/resistance fade', g: 'A', maxBars: 30 },
+    { id: 'sweep', n: 'Liquidity sweep reversal', g: 'B', maxBars: 36 },
+    { id: 'ob', n: 'Order block with break of structure', g: 'B', maxBars: 48 },
+    { id: 'ema', n: 'EMA pullback with trend filter', g: 'C', maxBars: 48 },
+    { id: 'brk', n: 'Breakout and retest', g: 'C', maxBars: 36 },
+    { id: 'fib', n: 'Fibonacci 61.8% retracement', g: 'C', maxBars: 48 },
+    { id: 'div', n: 'RSI divergence at a key level', g: 'D', maxBars: 36 },
+    { id: 'news', n: 'Spike fade (post-news style)', g: 'D', maxBars: 24 },
+    { id: 'orb', n: 'Opening range breakout and retest', g: 'D', maxBars: 36 },
+    { id: 'lt', n: 'Short-term trend (lower timeframes)', g: 'C', maxBars: 48 },
+    { id: 'rev', n: 'Counter-trend reversal', g: 'D', maxBars: 48 }
+  ];
+  const SID = {}; STRATS.forEach(s => { SID[s.id] = s; });
+  const hourOf = t => { const d = new Date(t * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; };
+  const pivH = (b, k, l, r) => { if (k - l < 0 || k + r >= b.length) return false; for (let j = k - l; j <= k + r; j++) if (j !== k && b[j].h > b[k].h) return false; return true; };
+  const pivL = (b, k, l, r) => { if (k - l < 0 || k + r >= b.length) return false; for (let j = k - l; j <= k + r; j++) if (j !== k && b[j].l < b[k].l) return false; return true; };
+  function regimeOf(tf, i) { const a = tf.adx[i]; return isNaN(a) ? 'neutral' : a < 20 ? 'range' : a < 25 ? 'neutral' : 'trend'; }
+  function htfDir(cur) {
+    const t = S.tfs[240]; if (!t) return 0; const j = lastDone(t, cur); if (j < 50) return 0; const b = t.bars[j];
+    return b.c > t.e50[j] && t.e20[j] > t.e50[j] ? 1 : b.c < t.e50[j] && t.e20[j] < t.e50[j] ? -1 : 0;
+  }
+  function hourDir(cur) {
+    const t = S.tfs[60]; if (!t) return 0; const j = lastDone(t, cur); if (j < 50) return 0; const b = t.bars[j];
+    return b.c > t.e50[j] ? 1 : b.c < t.e50[j] ? -1 : 0;
+  }
+  function fvgNear(tf, i, side) {
+    const b = tf.bars, a = tf.atr[i];
+    for (let k = i - 1; k >= Math.max(2, i - 14); k--) {
+      if (side === 1 && b[k - 2].h < b[k].l && b[k - 1].c > b[k - 1].o) { const lo = b[k - 2].h, hi = b[k].l; if (b[i].l <= hi + 0.2 * a && b[i].l >= lo - 0.3 * a) return true; }
+      if (side === -1 && b[k - 2].l > b[k].h && b[k - 1].c < b[k - 1].o) { const hi = b[k - 2].l, lo = b[k].h; if (b[i].h >= lo - 0.2 * a && b[i].h <= hi + 0.3 * a) return true; }
+    }
+    return false;
+  }
+  /* five confluence points: higher-timeframe bias, 1H structure, a key level close by, momentum, a clean candle */
+  function confluence(tf, i, cur, sig) {
+    const side = sig.side, b = tf.bars[i], a = tf.atr[i], rng = b.h - b.l || 1; let pts = 0; const why = [];
+    if (htfDir(cur) === side) { pts++; why.push('4H bias agrees'); }
+    if (hourDir(cur) === side) { pts++; why.push('1H structure agrees'); }
+    const lv = [tf.pdh[i], tf.pdl[i], tf.ash[i], tf.asl[i]].filter(x => !isNaN(x));
+    if (lv.some(x => Math.abs(sig.entry - x) <= 0.6 * a) || fvgNear(tf, i, side)) { pts++; why.push('At a key level or imbalance'); }
+    if (tf.mh[i] * side > 0 || (tf.mh[i] - tf.mh[i - 1]) * side > 0) { pts++; why.push('Momentum agrees'); }
+    const body = Math.abs(b.c - b.o) / rng, wick = side === 1 ? (Math.min(b.o, b.c) - b.l) / rng : (b.h - Math.max(b.o, b.c)) / rng;
+    if ((b.c - b.o) * side > 0 && (body >= 0.5 || wick >= 0.4)) { pts++; why.push('Clean signal candle'); }
+    return { pts: pts, why: why };
+  }
+  function mk(id, tf, i, side, entry, sl, d, reasons, trigger, extra) {
+    const a = tf.atr[i]; let risk = Math.abs(entry - sl);
+    if (!(risk > 0) || !d || d.length < 3) return null;
+    if (risk < Math.max(P.minRisk, 0.5 * a)) risk = Math.max(P.minRisk, 0.5 * a);
+    if (risk > 4 * a) return null;
+    sl = entry - side * risk;
+    const dd = d.map(x => Math.max(x, 0.15 * a));
+    for (let k = 1; k < 3; k++) if (dd[k] <= dd[k - 1]) dd[k] = dd[k - 1] + 0.2 * a;
+    return Object.assign({ side: side, score: 0, entry: entry, sl: sl, tp: dd.map(x => entry + side * x), risk: risk, atr: a, bias: 0, reasons: reasons, trigger: trigger, strat: id, maxBars: SID[id].maxBars }, extra || {});
+  }
+  const STRAT_FN = {
+    rsi2(tf, i) {
+      const c = tf.bars[i].c, s2 = tf.sma200[i]; if (isNaN(s2) || i < 200) return null;
+      const r2 = tf.rsi2[i], side = c > s2 && r2 < 10 ? 1 : c < s2 && r2 > 90 ? -1 : 0; if (!side) return null;
+      const a = tf.atr[i], d1 = (tf.sma5[i] - c) * side, d2 = (tf.bbm[i] - c) * side;
+      return mk('rsi2', tf, i, side, c, c - side * 2.5 * a, [Math.max(d1, 0.35 * a), Math.max(d2, 0.7 * a), Math.max(d2, 0.7 * a) * 1.6], ['RSI(2) ' + r2.toFixed(0) + ' stretched ' + (side === 1 ? 'down' : 'up') + ' against the 200 SMA trend'], 'RSI(2) pullback');
+    },
+    bb(tf, i) {
+      if (i < 25 || !(tf.adx[i] < 20)) return null;
+      const b = tf.bars, p = b[i - 1], q = b[i]; let side = 0;
+      if (p.c < tf.bbd[i - 1] && q.c > tf.bbd[i] && q.c > q.o) side = 1; else if (p.c > tf.bbu[i - 1] && q.c < tf.bbu[i] && q.c < q.o) side = -1;
+      if (!side) return null; const a = tf.atr[i], ext = side === 1 ? Math.min(p.l, q.l) : Math.max(p.h, q.h), sl = ext - side * 0.2 * a;
+      const d1 = (tf.bbm[i] - q.c) * side, d2 = (side === 1 ? tf.bbu[i] : tf.bbd[i]) - q.c; if (d1 < 0.5 * Math.abs(q.c - sl)) return null;
+      return mk('bb', tf, i, side, q.c, sl, [d1, Math.abs(d2), Math.abs(d2) + 0.5 * a], ['Closed outside the Bollinger band, then back inside', 'ADX ' + tf.adx[i].toFixed(0) + ' says the market is ranging'], 'Band fade');
+    },
+    vwap(tf, i) {
+      const sd = tf.vsd[i], n = tf.vn[i]; if (!(sd > 0) || n < 14) return null;
+      const b = tf.bars[i], dev = (b.c - tf.vw[i]) / sd, a = tf.atr[i], rng = b.h - b.l; if (rng <= 0) return null;
+      const side = dev <= -1.5 && dev >= -4 ? 1 : dev >= 1.5 && dev <= 4 ? -1 : 0; if (!side) return null;
+      const lw = side === 1 ? (Math.min(b.o, b.c) - b.l) / rng : (b.h - Math.max(b.o, b.c)) / rng, p = tf.bars[i - 1];
+      const eng = side === 1 ? (b.c > b.o && b.c > p.o && b.o <= p.c && p.c < p.o) : (b.c < b.o && b.c < p.o && b.o >= p.c && p.c > p.o);
+      if (!(lw >= 0.5 && (b.c - b.o) * side > 0) && !eng) return null;
+      const nb = Math.max(1, Math.ceil(60 / tf.m)); let touched = false; for (let k = Math.max(0, i - nb); k < i; k++) if (tf.bars[k].l <= tf.vw[k] && tf.vw[k] <= tf.bars[k].h) { touched = true; break; }
+      if (!touched) return null;
+      const sl = side === 1 ? b.l - 0.1 * a : b.h + 0.1 * a, dist = (tf.vw[i] - b.c) * side; if (dist < 0.8 * Math.abs(b.c - sl)) return null;
+      return mk('vwap', tf, i, side, b.c, sl, [0.6 * dist, dist, 1.4 * dist], ['Stretched ' + Math.abs(dev).toFixed(1) + ' deviations from the day average and rejected'], 'VWAP reversion');
+    },
+    range(tf, i) {
+      const L = 40; if (i < L + 2 || !(tf.adx[i] < 20)) return null; const b = tf.bars, a = tf.atr[i];
+      let hi = -Infinity, lo = Infinity; for (let k = i - L; k < i; k++) { if (b[k].h > hi) hi = b[k].h; if (b[k].l < lo) lo = b[k].l; }
+      const H = hi - lo; if (H < 2 * a || H > 8 * a) return null;
+      let th = 0, tl = 0, lastH = -9, lastL = -9;
+      for (let k = i - L; k < i; k++) { if (b[k].h >= hi - 0.2 * a && k - lastH >= 3) { th++; lastH = k; } if (b[k].l <= lo + 0.2 * a && k - lastL >= 3) { tl++; lastL = k; } }
+      if (th < 3 || tl < 3) return null; const q = b[i], rng = q.h - q.l; if (rng <= 0) return null; let side = 0;
+      if (q.l <= lo + 0.25 * a && q.c > q.o && (Math.min(q.o, q.c) - q.l) / rng >= 0.5) side = 1; else if (q.h >= hi - 0.25 * a && q.c < q.o && (q.h - Math.max(q.o, q.c)) / rng >= 0.5) side = -1;
+      if (!side) return null; const mid = (hi + lo) / 2, sl = side === 1 ? lo - 0.3 * a : hi + 0.3 * a;
+      const d1 = (mid - q.c) * side, d3 = side === 1 ? hi - q.c : q.c - lo; if (d1 < 0.5 * Math.abs(q.c - sl)) return null;
+      return mk('range', tf, i, side, q.c, sl, [d1, d3 - 0.15 * H, d3], ['Rejection at the edge of a ' + th + '-touch range'], 'Range fade');
+    },
+    sweep(tf, i, cur) {
+      if (i < 90) return null; const b = tf.bars, q = b[i], a = tf.atr[i], h = hourOf(q.t); if (tf.m > 60) return null;
+      const lows = [tf.asl[i], tf.pdl[i]].filter(x => !isNaN(x)), highs = [tf.ash[i], tf.pdh[i]].filter(x => !isNaN(x));
+      for (let k = i - 80; k < i - 6; k++) { if (pivL(b, k, 3, 3)) { for (let k2 = k + 4; k2 < i - 6; k2++) if (pivL(b, k2, 3, 3) && Math.abs(b[k2].l - b[k].l) <= 0.15 * a) lows.push(Math.min(b[k].l, b[k2].l)); } if (pivH(b, k, 3, 3)) { for (let k2 = k + 4; k2 < i - 6; k2++) if (pivH(b, k2, 3, 3) && Math.abs(b[k2].h - b[k].h) <= 0.15 * a) highs.push(Math.max(b[k].h, b[k2].h)); } }
+      let side = 0, lvl = 0, ext = 0;
+      for (const v of lows) { let sw = false, e = Infinity; for (let k = i - 2; k <= i; k++) if (b[k].l < v - 0.05 * a) { sw = true; e = Math.min(e, b[k].l); } if (sw && q.c > v && q.c > q.o && b[i - 3].c > v) { side = 1; lvl = v; ext = e; break; } }
+      if (!side) for (const v of highs) { let sw = false, e = -Infinity; for (let k = i - 2; k <= i; k++) if (b[k].h > v + 0.05 * a) { sw = true; e = Math.max(e, b[k].h); } if (sw && q.c < v && q.c < q.o && b[i - 3].c < v) { side = -1; lvl = v; ext = e; break; } }
+      if (!side) return null;
+      const sl = ext - side * 0.15 * a, risk = Math.abs(q.c - sl), opp = (side === 1 ? highs : lows).filter(x => (x - q.c) * side > 2 * risk).sort((x, y) => Math.abs(x - q.c) - Math.abs(y - q.c))[0];
+      const d3 = opp !== undefined ? Math.abs(opp - q.c) : 3 * risk;
+      return mk('sweep', tf, i, side, q.c, sl, [risk, 2 * risk, Math.max(d3, 3 * risk)], ['Swept a ' + (side === 1 ? 'low' : 'high') + ' of the Asian range, previous day or equal ' + (side === 1 ? 'lows' : 'highs') + ' and closed back inside'], 'Liquidity sweep');
+    },
+    ob(tf, i, cur) {
+      if (tf.m > 60 || i < 60) return null; const b = tf.bars, q = b[i], a = tf.atr[i], dir = htfDir(cur); if (!dir) return null;
+      for (let k = i - 2; k >= i - 24; k--) {
+        const imp = dir === 1 ? (b[k].c > b[k].o && b[k].c - b[k].o >= 1.0 * a) : (b[k].c < b[k].o && b[k].o - b[k].c >= 1.0 * a); if (!imp) continue;
+        let pv = -1; for (let p = k - 2; p >= k - 30 && p >= 4; p--) if (dir === 1 ? pivH(b, p, 3, 3) : pivL(b, p, 3, 3)) { pv = p; break; }
+        if (pv < 0 || pv + 3 >= k) continue; const brk = dir === 1 ? b[k].c > b[pv].h : b[k].c < b[pv].l; if (!brk) continue;
+        let o = -1; for (let p = k - 1; p >= Math.max(0, k - 6); p--) if (dir === 1 ? b[p].c < b[p].o : b[p].c > b[p].o) { o = p; break; } if (o < 0) continue;
+        const zh = b[o].h, zl = b[o].l; let early = false; for (let p = k + 1; p < i; p++) if (dir === 1 ? b[p].l <= zh : b[p].h >= zl) { early = true; break; } if (early) continue;
+        const touch = dir === 1 ? q.l <= zh && q.c > zl && q.c > q.o : q.h >= zl && q.c < zl + (zh - zl) + 1e9 && q.h >= zl && q.c < q.o && q.c < zh;
+        if (!touch) continue; const sl = dir === 1 ? zl - 0.1 * a : zh + 0.1 * a, risk = Math.abs(q.c - sl), swing = Math.abs((dir === 1 ? Math.max(b[k].h, b[pv].h) : Math.min(b[k].l, b[pv].l)) - q.c);
+        return mk('ob', tf, i, dir, q.c, sl, [risk, Math.max(2 * risk, swing), Math.max(3 * risk, swing * 1.4)], ['4H trend ' + (dir === 1 ? 'up' : 'down') + ', break of structure, retest of the order block'], 'Order block retest');
+      }
+      return null;
+    },
+    ema(tf, i, cur) {
+      const bi = biasAt(cur, tf.m).bias, side = bi >= P.biasMin ? 1 : bi <= -P.biasMin ? -1 : 0; if (!side) return null;
+      const r = trendSig(tf, i, side, bi, false, true); return r;
+    },
+    brk(tf, i) {
+      if (i < 40) return null; const b = tf.bars, q = b[i], a = tf.atr[i];
+      for (let k = i - 1; k >= i - 8; k--) {
+        let hi = -Infinity, lo = Infinity; for (let p = k - 12; p < k; p++) { if (b[p].h > hi) hi = b[p].h; if (b[p].l < lo) lo = b[p].l; }
+        const H = hi - lo; if (H > 2.8 * a || H <= 0) continue; const up = b[k].c > hi && b[k].h - b[k].l >= 1.1 * a, dn = b[k].c < lo && b[k].h - b[k].l >= 1.1 * a; if (!up && !dn) continue;
+        const side = up ? 1 : -1, lvl = up ? hi : lo; let used = false;
+        for (let p = k + 1; p < i; p++) if (side === 1 ? (b[p].l <= lvl + 0.15 * a || b[p].c < lvl - 0.1 * a) : (b[p].h >= lvl - 0.15 * a || b[p].c > lvl + 0.1 * a)) { used = true; break; } if (used) continue;
+        const ok = side === 1 ? q.l <= lvl + 0.15 * a && q.c > lvl && q.c > q.o : q.h >= lvl - 0.15 * a && q.c < lvl && q.c < q.o; if (!ok) continue;
+        const sl = lvl - side * 0.5 * H;
+        return mk('brk', tf, i, side, q.c, sl, [0.5, 1, 1.5].map(x => (lvl + side * x * H - q.c) * side), ['Broke out of a ' + (H / a).toFixed(1) + ' ATR consolidation and retested the level'], 'Breakout retest');
+      }
+      return null;
+    },
+    fib(tf, i, cur) {
+      if (i < 40) return null; const b = tf.bars, q = b[i], a = tf.atr[i];
+      for (const side of [1, -1]) {
+        if (side === 1 ? !(tf.e20[i] > tf.e50[i]) : !(tf.e20[i] < tf.e50[i])) continue;
+        let B = -1; for (let p = i - 6; p >= i - 40; p--) if (side === 1 ? pivH(b, p, 5, 5) : pivL(b, p, 5, 5)) { B = p; break; } if (B < 0) continue;
+        let A = -1; for (let p = B - 3; p >= Math.max(5, B - 40); p--) if (side === 1 ? pivL(b, p, 5, 5) : pivH(b, p, 5, 5)) { A = p; break; } if (A < 0) continue;
+        const bp = side === 1 ? b[B].h : b[B].l, ap = side === 1 ? b[A].l : b[A].h, leg = Math.abs(bp - ap); if (leg < 2.5 * a) continue;
+        const z1 = bp - side * 0.5 * leg, z2 = bp - side * 0.618 * leg, z3 = bp - side * 0.786 * leg, zm = (z1 + z2) / 2;
+        const inZone = side === 1 ? q.l <= z1 && q.l >= z3 : q.h >= z1 && q.h <= z3; if (!inZone) continue;
+        let broke = false; for (let p = B + 1; p < i; p++) if (side === 1 ? b[p].l < z3 : b[p].h > z3) { broke = true; break; } if (broke) continue;
+        if (Math.min(Math.abs(tf.e20[i] - zm), Math.abs(tf.e50[i] - zm)) > 0.6 * a) continue;
+        const conf = side === 1 ? q.c > q.o && q.c > b[i - 1].h : q.c < q.o && q.c < b[i - 1].l; if (!conf) continue;
+        const sl = z3 - side * 0.1 * a, dB = (bp - q.c) * side; if (dB < 0.8 * Math.abs(q.c - sl)) continue;
+        return mk('fib', tf, i, side, q.c, sl, [0.5 * dB, dB, dB + 0.272 * leg], ['Retraced into the 50-61.8% zone of a ' + (leg / a).toFixed(1) + ' ATR leg, lined up with an EMA'], 'Fibonacci retracement');
+      }
+      return null;
+    },
+    div(tf, i) {
+      if (i < 70) return null; const b = tf.bars, q = b[i], a = tf.atr[i];
+      for (const side of [1, -1]) {
+        let p2 = -1; for (let p = i - 4; p >= i - 14; p--) if (side === 1 ? pivL(b, p, 3, 3) : pivH(b, p, 3, 3)) { p2 = p; break; } if (p2 < 0) continue;
+        let p1 = -1; for (let p = p2 - 5; p >= p2 - 50 && p >= 3; p--) if (side === 1 ? pivL(b, p, 3, 3) : pivH(b, p, 3, 3)) { p1 = p; break; } if (p1 < 0) continue;
+        const v1 = side === 1 ? b[p1].l : b[p1].h, v2 = side === 1 ? b[p2].l : b[p2].h;
+        if (side === 1 ? !(v2 < v1 - 0.05 * a && tf.rsi[p2] > tf.rsi[p1] + 2 && tf.rsi[p2] < 45) : !(v2 > v1 + 0.05 * a && tf.rsi[p2] < tf.rsi[p1] - 2 && tf.rsi[p2] > 55)) continue;
+        const keys = side === 1 ? [tf.pdl[i], tf.asl[i], tf.ll[i]] : [tf.pdh[i], tf.ash[i], tf.hh[i]];
+        if (!keys.some(x => !isNaN(x) && Math.abs(v2 - x) <= 0.6 * a)) { let ext = side === 1 ? Infinity : -Infinity; for (let p = Math.max(0, i - 150); p < i; p++) ext = side === 1 ? Math.min(ext, b[p].l) : Math.max(ext, b[p].h); if (Math.abs(v2 - ext) > 0.6 * a) continue; }
+        let mn = side === 1 ? -Infinity : Infinity; for (let p = p2 + 1; p < i; p++) mn = side === 1 ? Math.max(mn, b[p].h) : Math.min(mn, b[p].l);
+        if (!(side === 1 ? q.c > mn && q.c > q.o : q.c < mn && q.c < q.o)) continue;
+        const sl = v2 - side * 0.15 * a, risk = Math.abs(q.c - sl);
+        return mk('div', tf, i, side, q.c, sl, [risk, 2 * risk, 3 * risk], ['RSI divergence at a key level, then a break of the minor swing'], 'RSI divergence');
+      }
+      return null;
+    },
+    news(tf, i) {
+      if (tf.m > 15 || i < 40) return null; const b = tf.bars, q = b[i], a = tf.atr[i], w1 = Math.max(1, Math.ceil(15 / tf.m)), w2 = Math.ceil(45 / tf.m) + 1;
+      for (let k = i - w1; k >= i - w2; k--) {
+        const rg = b[k].h - b[k].l; if (rg < 2.5 * tf.atr[k - 1]) continue; const side = b[k].c > b[k].o ? -1 : 1;
+        let cont = false; for (let p = k + 1; p <= i; p++) if (side === -1 ? b[p].h > b[k].h + 0.1 * a : b[p].l < b[k].l - 0.1 * a) { cont = true; break; } if (cont) continue;
+        if (!((q.c - q.o) * side > 0 && (side === -1 ? q.c < b[i - 1].c : q.c > b[i - 1].c))) continue;
+        const ex = side === -1 ? b[k].h : b[k].l, st = b[k].o, mv = Math.abs(ex - st), risk = Math.abs(q.c - (ex + (side === -1 ? 0.1 * a : -0.1 * a)));
+        const t1 = ex + side * 0.5 * mv, d1x = (t1 - q.c) * side, d2x = (st - q.c) * side; if (d1x < 0.6 * risk) continue;
+        return mk('news', tf, i, side, q.c, ex + (side === -1 ? 0.1 * a : -0.1 * a), [d1x, Math.max(d2x, d1x + 0.2 * a), Math.max(d2x, d1x + 0.2 * a) + 0.3 * mv], ['Spike of ' + (rg / tf.atr[k - 1]).toFixed(1) + 'x the average range failed to continue and reversed'], 'Spike fade');
+      }
+      return null;
+    },
+    orb(tf, i) {
+      if (tf.m > 30 || i < 40) return null; const b = tf.bars, q = b[i], a = tf.atr[i], d0 = Math.floor(q.t / 86400) * 86400;
+      const opens = [7 * 3600, (usDst(q.t * 1000) ? 13.5 : 14.5) * 3600];
+      for (const o of opens) {
+        const t0 = d0 + o, t1 = t0 + 1800; if (q.t < t1 + tf.m * 60 || q.t > t1 + 3 * 3600) continue; let hi = -Infinity, lo = Infinity, n = 0, idx = -1;
+        for (let k = i; k >= Math.max(0, i - 60); k--) { if (b[k].t >= t0 && b[k].t < t1) { n++; if (b[k].h > hi) hi = b[k].h; if (b[k].l < lo) lo = b[k].l; idx = k; } else if (b[k].t < t0) break; }
+        if (!n || hi - lo <= 0.3 * a || hi - lo > 4 * a) continue; const H = hi - lo; let bs = 0, bk = -1;
+        for (let k = idx; k < i; k++) { if (b[k].t < t1) continue; if (b[k].c > hi) { bs = 1; bk = k; break; } if (b[k].c < lo) { bs = -1; bk = k; break; } }
+        if (!bs) continue; const lvl = bs === 1 ? hi : lo; let used = false;
+        for (let p = bk + 1; p < i; p++) if (bs === 1 ? (b[p].l <= lvl + 0.15 * a || b[p].c < lvl) : (b[p].h >= lvl - 0.15 * a || b[p].c > lvl)) { used = true; break; } if (used) continue;
+        const ok = bs === 1 ? q.l <= lvl + 0.15 * a && q.c > lvl && q.c > q.o : q.h >= lvl - 0.15 * a && q.c < lvl && q.c < q.o; if (!ok) continue;
+        const sl = (hi + lo) / 2, off = Math.abs(q.c - lvl);
+        return mk('orb', tf, i, bs, q.c, sl, [0.75 * H - (bs === 1 ? q.c - lvl : lvl - q.c), 1.5 * H - (bs === 1 ? q.c - lvl : lvl - q.c), 2 * H - (bs === 1 ? q.c - lvl : lvl - q.c)], ['Opening range ' + (o === 7 * 3600 ? 'London' : 'New York') + ' broke and held on the retest'], 'Opening range breakout');
+      }
+      return null;
+    },
+    lt(tf, i, cur) {
+      const full = biasAt(cur, tf.m).bias; if (Math.abs(full) >= P.biasMin) return null;
+      const b2 = biasAt(cur, tf.m, tf.m * P.ltMul).bias; if (Math.abs(b2) < P.ltBias) return null;
+      return trendSig(tf, i, b2 > 0 ? 1 : -1, b2, true, true);
+    },
+    rev(tf, i, cur) {
+      const bi = biasAt(cur, tf.m).bias, fs = bi >= P.biasMin ? 1 : bi <= -P.biasMin ? -1 : 0; return reversalSig(tf, i, fs);
+    }
+  };
+
   /* ---------- backtest (no lookahead) ---------- */
   function simulate(tf, i, sig) {
     const bars = tf.bars, fi = i + 1;
@@ -575,7 +831,8 @@ const makeEngine = function () {
     if (!(fb.l <= sig.entry && sig.entry <= fb.h)) return null; // limit at signal close not touched
     const side = sig.side, risk = sig.risk, entry = sig.entry;
     let rem = 1, R = 0, stop = sig.sl, ev = [], hit = [false, false, false], exit = null;
-    for (let j = fi; j < bars.length && j <= fi + P.maxBars; j++) {
+    const MB = sig.maxBars || P.maxBars;
+    for (let j = fi; j < bars.length && j <= fi + MB; j++) {
       const bb = bars[j];
       if (side === 1 ? bb.l <= stop : bb.h >= stop) {
         const d = rem * ((stop - entry) * side / risk);
@@ -587,7 +844,7 @@ const makeEngine = function () {
         const px = sig.tp[n];
         if (side === 1 ? bb.h >= px : bb.l <= px) {
           hit[n] = true;
-          const part = n < 2 ? 1 / 3 : rem, d = part * (n + 1);
+          const part = n < 2 ? 1 / 3 : rem, d = part * ((px - entry) * side / risk);
           R += d; rem -= part;
           ev.push({ j: j, end: bb.end, k: 'TP' + (n + 1), price: px, dR: d, rem: rem });
           if (n === 0) stop = entry; if (n === 1) stop = sig.tp[0];
@@ -596,11 +853,11 @@ const makeEngine = function () {
       if (rem <= 1e-9) { exit = j; break; }
     }
     if (exit === null) {
-      const j = Math.min(bars.length - 1, fi + P.maxBars), bb = bars[j], d = rem * ((bb.c - entry) * side / risk);
+      const j = Math.min(bars.length - 1, fi + MB), bb = bars[j], d = rem * ((bb.c - entry) * side / risk);
       R += d; ev.push({ j: j, end: bb.end, k: 'TIME', price: bb.c, dR: d, rem: 0 }); exit = j;
     }
     const costR = P.cost / risk; R -= costR;
-    return { side: side, sigIdx: i, sigEnd: bars[i].end, sigT: bars[i].t, fillIdx: fi, entry: entry, sl: sig.sl, tp: sig.tp, risk: risk, score: sig.score, reasons: sig.reasons, trigger: sig.trigger, counter: !!sig.counter, lt: !!sig.lt, bias: sig.bias, R: R, costR: costR, hit: hit, ev: ev, exitIdx: exit, exitEnd: bars[exit].end, exitT: bars[exit].t, exitPx: ev[ev.length - 1].price, exitK: ev[ev.length - 1].k };
+    return { side: side, sigIdx: i, sigEnd: bars[i].end, sigT: bars[i].t, fillIdx: fi, entry: entry, sl: sig.sl, tp: sig.tp, risk: risk, score: sig.score, reasons: sig.reasons, trigger: sig.trigger, strat: sig.strat || (sig.counter ? 'rev' : sig.lt ? 'lt' : 'ema'), conf: sig.conf, counter: !!sig.counter, lt: !!sig.lt, bias: sig.bias, R: R, costR: costR, hit: hit, ev: ev, exitIdx: exit, exitEnd: bars[exit].end, exitT: bars[exit].t, exitPx: ev[ev.length - 1].price, exitK: ev[ev.length - 1].k };
   }
   function backtest(tf) {
     const out = [], bars = tf.bars; let i = 60;
@@ -669,7 +926,7 @@ const makeEngine = function () {
     return { t: nb.t, o: S.base[nb.start].o, h: h, l: l, c: S.base[hiIdx].c, forming: true };
   }
 
-  return { S: S, P: P, TFS: TFS, LABEL: LABEL, genSim: genSim, parseCSV: parseCSV, normalise: normalise, init: init, lastDone: lastDone, trendScore: trendScore, trendLabel: trendLabel, biasAt: biasAt, evalSignal: evalSignal, trades: trades, closedAt: closedAt, openAt: openAt, statusAt: statusAt, stats: stats, zones: zones, forming: forming, price: price, isTrading: isTrading };
+  return { S: S, P: P, TFS: TFS, LABEL: LABEL, genSim: genSim, parseCSV: parseCSV, normalise: normalise, init: init, lastDone: lastDone, trendScore: trendScore, trendLabel: trendLabel, biasAt: biasAt, evalSignal: evalSignal, trades: trades, closedAt: closedAt, openAt: openAt, statusAt: statusAt, stats: stats, zones: zones, STRATS: STRATS, backtest: backtest, regimeOf: regimeOf, forming: forming, price: price, isTrading: isTrading };
 };
 const Engine = makeEngine();
 if (typeof module !== 'undefined') module.exports = Engine;
@@ -1464,7 +1721,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
         return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
       }).join('') + '</div>' +
         '<div class="score" style="margin:8px 0 2px"><span class="lbl">Score</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
-        (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
+        (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + (function () { const g = riskGuard(); return '<div class="' + (g.stop ? 'warn' : 'note') + '" style="margin:6px 0 0">' + g.text + '</div>'; })() + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + (open.conf != null ? '[' + open.conf + '/5] ' : '') + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';
@@ -1502,6 +1759,17 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   /* ---------- backtest modal ---------- */
+  const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal"};
+  function renderBoard() {
+    const rows = BOARD.map(b => { if (!b.n) return '<tr><td>' + SNAME[b.id] + '</td><td colspan="8">no setups found in the data</td></tr>'; const ok = b.pf > 1.3 && b.exp > 0 && b.n >= 100 && b.oosPf > 1.3; return '<tr><td>' + SNAME[b.id] + '</td><td>' + b.n + '</td><td>' + b.wr + '%</td><td>' + (b.exp > 0 ? '+' : '') + b.exp + 'R</td><td class="' + (b.pf >= 1 ? 'up' : 'dn') + '">' + b.pf + '</td><td>-' + b.dd + 'R</td><td>' + b.ml + '</td><td>' + b.oosPf + '</td><td class="' + (ok ? 'up' : 'dn') + '">' + (ok ? 'Pass' : 'Not yet') + '</td></tr>'; }).join('');
+    $('#board').innerHTML = '<tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Avg R</th><th>PF</th><th>Max DD</th><th>Worst streak</th><th>PF 2nd half</th><th>Rule</th></tr>' + rows;
+  }
+  function riskGuard() {
+    const m = st.tf, cur = E.S.cursor, d0 = new Date(E.S.base[cur].t * 1000 + 3 * 3600000); d0.setUTCHours(0, 0, 0, 0); const t0 = d0.getTime() / 1000 - 3 * 3600;
+    const cl = E.closedAt(m, cur).filter(t => t.exitT >= t0); let sum = 0, streak = 0; cl.forEach(t => { sum += t.R; streak = t.R <= 0 ? streak + 1 : 0; });
+    const stop = streak >= 3 || sum <= -4;
+    return { stop: stop, text: stop ? 'RISK STOP. ' + (streak >= 3 ? '3 losses in a row today' : 'daily loss limit reached') + ' (' + sgn(sum) + 'R). No more entries today.' : 'Risk guard: ' + sgn(sum) + 'R today, ' + streak + ' losses in a row. Risk 0.5% a trade, stop at 3 losses in a row or -4R (2%).' };
+  }
   function renderBacktest() {
     const m = st.tf, cur = E.S.cursor, cl = E.closedAt(m, cur), s = E.stats(cl);
     const days = Math.round((E.S.base[cur].t - E.S.base[0].t) / 86400);
@@ -1511,11 +1779,11 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (!s) { $('#stats').innerHTML = '<div class="st"><span class="lbl">Trades</span><div class="v">0</div></div>'; $('#trades').innerHTML = ''; $('#split').innerHTML = ''; drawEq([]); return; }
     const tiles = [['Trades', s.n, ''], ['Win rate', (s.wr * 100).toFixed(0) + '%', s.wr >= .5 ? 'up' : 'dn'], ['Profit factor', isFinite(s.pf) ? s.pf.toFixed(2) : 'n/a', s.pf >= 1 ? 'up' : 'dn'], ['Expectancy', sgn(s.exp) + 'R', s.exp >= 0 ? 'up' : 'dn'], ['Total', sgn(s.tot) + 'R', s.tot >= 0 ? 'up' : 'dn'], ['Max drawdown', '-' + s.dd.toFixed(1) + 'R', 'dn'], ['TP1 / TP2 / TP3', s.hit.map(x => (x * 100).toFixed(0)).join(' / ') + '%', '']];
     $('#stats').innerHTML = tiles.map(t => '<div class="st"><span class="lbl">' + t[0] + '</span><div class="v ' + t[2] + '">' + t[1] + '</div></div>').join('');
-    $('#trades').innerHTML = '<tr><th>Time</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>R</th></tr>' + cl.slice(-8).reverse().map(t => '<tr><td>' + dm(t.sigT) + ' ' + hm(t.sigT) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.exitPx) + '</td><td>' + t.exitK + '</td><td class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + '</td></tr>').join('');
+    $('#trades').innerHTML = '<tr><th>Time</th><th>Setup</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>R</th></tr>' + cl.slice(-8).reverse().map(t => '<tr><td>' + dm(t.sigT) + ' ' + hm(t.sigT) + '</td><td>' + (SNAME[t.strat] || t.strat) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.exitPx) + '</td><td>' + t.exitK + '</td><td class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + '</td></tr>').join('');
     const cut = E.S.warm + (cur - E.S.warm) * 0.7, a = E.stats(cl.filter(t => t.sigEnd < cut)), b = E.stats(cl.filter(t => t.sigEnd >= cut));
     const rowOf = (n, x) => '<tr><td>' + n + '</td>' + (x ? '<td>' + x.n + '</td><td>' + (x.wr * 100).toFixed(0) + '%</td><td>' + (isFinite(x.pf) ? x.pf.toFixed(2) : 'n/a') + '</td><td>' + sgn(x.exp) + 'R</td><td>' + sgn(x.tot) + 'R</td>' : '<td colspan="5">no trades</td>') + '</tr>';
     $('#split').innerHTML = '<tr><th>Split</th><th>Trades</th><th>Win rate</th><th>Profit factor</th><th>Expectancy</th><th>Total</th></tr>' + rowOf('First 70% of history', a) + rowOf('Last 30% of history', b);
-    drawEq(s.curve);
+    drawEq(s.curve); renderBoard();
   }
   function drawEq(curve) {
     const cv = $('#eq'), dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight; if (!w) return;

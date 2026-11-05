@@ -194,6 +194,31 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
   .trendbox { display: none; }
   .bottom { flex-wrap: wrap; } .bt2 { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* accounts: sign-in gate, journal, admin */
+.gate { position: fixed; inset: 0; z-index: 40; background: var(--bg); display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto; }
+.gate[hidden] { display: none; }
+.gcard { width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 22px 22px 18px; }
+.gcard h1 { margin: 0 0 4px; font: 700 26px/1 var(--f-display); letter-spacing: .08em; color: var(--gold); }
+.gcard p.sub { margin: 0 0 16px; color: var(--mute); font-size: 12.5px; }
+.gtabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.gtabs button { flex: 1; background: var(--panel2); color: var(--mute); border: 1px solid var(--line); border-radius: 4px; padding: 8px; font: 600 12px var(--f-body); cursor: pointer; }
+.gtabs button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
+.fld { display: block; margin-bottom: 10px; }
+.fld > span { display: block; margin-bottom: 5px; font: 600 10px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
+.fld input, .fld select, .jf input, .jf select { width: 100%; background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; font: 500 13px var(--f-mono); }
+.gmsg { min-height: 18px; margin: 4px 0 10px; font: 500 12px var(--f-body); color: var(--mute); }
+.gmsg.err { color: var(--dn); } .gmsg.ok { color: var(--up); }
+.gcard .btn.solid { width: 100%; padding: 10px; }
+.chip { flex: none; font: 600 10px/1 var(--f-body); letter-spacing: .08em; text-transform: uppercase; padding: 7px 9px; border: 1px solid var(--line); border-radius: 3px; color: var(--mute); }
+.chip.ok { color: var(--up); border-color: var(--up); } .chip.warn { color: var(--warn); border-color: var(--warn); } .chip.bad { color: var(--dn); border-color: var(--dn); }
+.mtabs { display: flex; gap: 6px; margin: 0 0 12px; }
+.mtabs button { background: var(--panel2); color: var(--mute); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; font: 600 12px var(--f-body); cursor: pointer; }
+.mtabs button[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
+.jf { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.jf label > span { display: block; margin-bottom: 4px; font: 600 9.5px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
+.tiny { padding: 3px 8px; font-size: 11px; }
+@media (max-width: 960px) { .acts { flex-wrap: wrap; } }
 </style>
 
 <div class="app">
@@ -252,6 +277,10 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
     <div class="stat mid"><span class="lbl">Live spot price</span><span class="v" id="mmPx">--</span><span class="s" id="mmPos"></span></div>
     <div class="stat" style="align-items:flex-end;text-align:right"><span class="lbl">Resistance (24h high)</span><span class="v dn" id="mmHi">--</span><span class="s" id="mmHiS"></span></div>
     <div class="acts">
+      <span class="chip" id="planChip" hidden></span>
+      <button class="btn" id="acctOpen" type="button" hidden>Journal</button>
+      <button class="btn gold" id="adminOpen" type="button" hidden>Admin</button>
+      <button class="btn" id="signOut" type="button" hidden>Sign out</button>
       <button class="btn" id="alerts" type="button">Alerts on</button>
       <button class="btn" id="testSig" type="button" title="Draws a made-up trade and fires the alert, to check they work">Test signal</button>
       <button class="btn" id="dataOpen" type="button">Data</button>
@@ -275,6 +304,71 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       <div class="lbl" style="margin:14px 0 6px">Strategy scoreboard (real gold data, 15m to 4H, costs included)</div><div class="tblwrap"><table class="t" id="board"></table></div>
       <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. Gated set: on real data the combined 15m and 1H results beat the old all-strategies mix (35R against 29R over 7 weeks to 7 months), but the choice was made on the same data and the larger pooled scoreboard below shows the kept strategies near break-even, so expect a small edge at best. Strategies that lost are switched off and show as off. Under 15m the engine is about break-even after costs, so treat 1m and 5m alerts as unproven. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
       <p class="assump">Method: a router reads ADX(14). Below 20 the market counts as ranging and the mean reversion group runs (RSI(2), Bollinger fade, day-average reversion, range fade) with sweeps and divergence. At 25 or more it counts as trending and the order block, EMA pullback, breakout retest and Fibonacci setups run. Between 20 and 25 the sweep, divergence, spike fade, opening range, Fibonacci and EMA setups run. Each setup needs 3 of 5 confluence points (4H bias, 1H structure, key level or gap, momentum, clean candle) and must fall between 07:30 and 17:00 UTC. The short-term and counter-trend signals from before are kept. Entry is a limit order at the signal bar close and must trade on the next bar. A third exits at each of TP1, TP2 and TP3 priced from the strategy rules, the stop moves to entry after TP1 and to TP1 after TP2, costs are $0.30 per ounce, the stop counts first when a bar touches both, and trades time out after the strategy time limit. No news calendar is connected, so the news blackout is not applied and the spike fade is a pattern rule. Day average uses typical price without volume.</p>
+    </div>
+  </div>
+</div>
+
+<div class="gate" id="auth" hidden>
+  <div class="gcard">
+    <h1>XAUUSD SCANNER</h1>
+    <p class="sub" id="gSub">Live gold signals with entries, three targets and a stop.</p>
+    <div id="gForms">
+      <div class="gtabs" role="group" aria-label="Account"><button type="button" id="gtIn" aria-pressed="true">Sign in</button><button type="button" id="gtUp" aria-pressed="false">Create account</button></div>
+      <form id="gForm" autocomplete="on">
+        <label class="fld" id="fName" hidden><span>Full name</span><input id="gName" autocomplete="name"></label>
+        <label class="fld" id="fPhone" hidden><span>M-Pesa phone number</span><input id="gPhone" type="tel" autocomplete="tel" placeholder="07xx xxx xxx"></label>
+        <label class="fld"><span>Email</span><input id="gEmail" type="email" autocomplete="email" required></label>
+        <label class="fld"><span>Password</span><input id="gPass" type="password" autocomplete="current-password" minlength="6" required></label>
+        <div class="gmsg" id="gMsg" role="status"></div>
+        <button class="btn solid" id="gGo" type="submit">Sign in</button>
+      </form>
+      <p class="sub" id="gHint" style="margin:12px 0 0">New accounts get a 2 day free trial.</p>
+    </div>
+    <div id="gLocked" hidden>
+      <p id="gLockMsg" style="margin:0 0 12px"></p>
+      <p class="sub" id="gPay"></p>
+      <div class="gmsg" id="gLockStat" role="status"></div>
+      <button class="btn solid" id="gRecheck" type="button">I have paid, check again</button>
+      <button class="btn" id="gOut" type="button" style="width:100%;margin-top:8px">Sign out</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="mAcct" hidden role="dialog" aria-modal="true" aria-label="Journal and history">
+  <div class="sheet">
+    <div class="mh"><span class="lbl">My account</span><span><span class="lbl" id="acctWho" style="margin-right:12px"></span><button class="btn" data-close type="button">Close</button></span></div>
+    <div style="padding:12px 14px">
+      <div class="mtabs"><button type="button" id="tabJ" aria-pressed="true">Trade journal</button><button type="button" id="tabH" aria-pressed="false">Signal history</button></div>
+      <div id="paneJ">
+        <div class="stats" id="jStats"></div>
+        <div class="jf">
+          <label><span>Side</span><select id="jSide"><option value="buy">Buy</option><option value="sell">Sell</option></select></label>
+          <label><span>Timeframe</span><select id="jTf"></select></label>
+          <label><span>Strategy</span><input id="jStrat" placeholder="e.g. sweep"></label>
+          <label><span>Entry</span><input id="jEntry" type="number" step="0.01"></label>
+          <label><span>Stop loss</span><input id="jSl" type="number" step="0.01"></label>
+          <label><span>Exit price</span><input id="jExit" type="number" step="0.01" placeholder="blank if open"></label>
+          <label><span>Note</span><input id="jNote" placeholder="optional"></label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><button class="btn gold" id="jUse" type="button">Use current signal</button><button class="btn solid" id="jAdd" type="button">Add trade</button><span class="lbl" id="jMsg" style="text-transform:none;letter-spacing:0;font-size:12px"></span></div>
+        <div class="tblwrap"><table class="t" id="jTable"></table></div>
+      </div>
+      <div id="paneH" hidden>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><span class="lbl">Timeframe</span><select id="hTf" style="background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:5px 8px;font:500 12px var(--f-mono)"></select><span class="lbl" style="text-transform:none;letter-spacing:0;font-size:12px">Every signal the scanner would have fired on closed candles, newest first, costs included.</span></div>
+        <div class="tblwrap"><table class="t" id="hTable"></table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="mAdmin" hidden role="dialog" aria-modal="true" aria-label="Admin">
+  <div class="sheet">
+    <div class="mh"><span class="lbl">Admin</span><span><button class="btn tiny" id="aRefresh" type="button" style="margin-right:8px">Refresh</button><button class="btn" data-close type="button">Close</button></span></div>
+    <div style="padding:12px 14px">
+      <div class="stats" id="aStats"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><input id="aFind" placeholder="Search email, name or phone" style="flex:1;max-width:320px;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:7px 10px;font:500 12px var(--f-mono)"><span class="lbl" id="aMsg" style="text-transform:none;letter-spacing:0;font-size:12px"></span></div>
+      <div class="tblwrap"><table class="t" id="aTable" style="min-width:760px"></table></div>
+      <p class="assump">Paid: confirms a payment and gives the number of days you type, added to any time left. Trial: adds days of free trial. Block cuts access straight away. Access is checked on the server, so a blocked or expired user loses the feed within a few minutes.</p>
     </div>
   </div>
 </div>
@@ -952,7 +1046,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const lmin = t => { const d = new Date(t * 1000); return d.getHours() * 60 + d.getMinutes(); };
   const lday = t => { const d = new Date(t * 1000); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
   const TZ = (() => { const o = -new Date().getTimezoneOffset(), a = Math.abs(o); return 'UTC' + (o >= 0 ? '+' : '-') + Math.floor(a / 60) + (a % 60 ? ':' + pad2(a % 60) : ''); })();
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
   st.tv = ls.get('xau.tv3') === null ? !(window.claude && window.claude.use) : ls.get('xau.tv3') === '1';
   st.ct = ls.get('xau.ct') === 'light' ? 'light' : 'dark'; st.ema = ls.get('xau.ema') === '1';
@@ -1277,7 +1371,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     closeWs(); stopWatch(); st.mode = 'connecting'; st.err = '';
     st.note = 'Connecting to the live feed. These prices are placeholders until it answers.'; setLive('Connecting', ''); renderAll();
     try {
-      let mcp = await getMcp(); if (!mcp && tdKey()) mcp = restShim(); let why = '';
+      let mcp = await getMcp(); if (!mcp && AUTH.on && AUTH.ok) mcp = cloudShim(); else if (!mcp && tdKey()) mcp = restShim(); let why = '';
       if (mcp) { try { await connectTwelve(mcp); return; } catch (e) { why = tdMessage(e); if (st.res === 1) { st.res = 5; why += ' Falling back to 5 minute candles.'; try { await connectTwelve(mcp); return; } catch (e2) {} } } }
       else why = 'Add your Twelve Data API key under Data to get live gold prices here.';
       try { await connectBinance(); return; } catch (e) { if (!mcp) why += ' Binance could not be reached either (' + e.message + ').'; }
@@ -1849,9 +1943,257 @@ if (typeof module !== 'undefined') module.exports = Engine;
   if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe($('.chartwrap'));
   window.addEventListener('resize', () => { drawChart(); if (isOpen('#mBt')) renderBacktest(); });
 
+  /* ---------- accounts: sign in, 2 day trial, paid access, journal, admin ---------- */
+  /* The page code is public, so the lock lives on the server: the candles table only answers users whose access is live. */
+  const SB_URL = 'https://efqdsesxxrxretvadcoq.supabase.co', SB_KEY = 'sb_publishable_vv31qwydS3GZ2FGGJyUGMA_3de6Jb6E';
+  const PAY_INFO = ''; // Fill in how people pay you, for example: Send the amount by M-Pesa to 07xx xxx xxx, then press the button below.
+  const AUTH = { on: !(window.claude && window.claude.use), sess: null, me: null, ok: false, started: false, mode: 'in' };
+  const SKEY = 'xau.sb';
+  const dshort = v => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
+  function sbSet(j) {
+    AUTH.sess = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600), user: j.user || (AUTH.sess && AUTH.sess.user) };
+    ls.set(SKEY, JSON.stringify(AUTH.sess));
+  }
+  function sbClear() { AUTH.sess = null; AUTH.me = null; AUTH.ok = false; ls.set(SKEY, ''); }
+  async function sbRefresh() {
+    if (!AUTH.sess) return false;
+    try {
+      const r = await fetch(SB_URL + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: AUTH.sess.refresh_token }) });
+      if (!r.ok) { if (r.status === 400 || r.status === 401) sbClear(); return false; }
+      sbSet(await r.json()); return true;
+    } catch (e) { return false; }
+  }
+  async function sbFetch(path, opt) {
+    opt = opt || {};
+    if (AUTH.sess && AUTH.sess.expires_at - 45 < Date.now() / 1000) await sbRefresh();
+    const go = () => fetch(SB_URL + path, Object.assign({}, opt, { headers: Object.assign({ apikey: SB_KEY, 'Content-Type': 'application/json' }, AUTH.sess ? { Authorization: 'Bearer ' + AUTH.sess.access_token } : {}, opt.headers || {}) }));
+    let r = await go();
+    if (r.status === 401 && AUTH.sess && await sbRefresh()) r = await go();
+    return r;
+  }
+  const sbRpc = (name, args) => sbFetch('/rest/v1/rpc/' + name, { method: 'POST', body: JSON.stringify(args || {}) });
+  async function sbJson(r) { const t = await r.text(); try { return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+  const sbErr = j => (j && (j.msg || j.error_description || j.message || j.error)) || 'Something went wrong. Try again.';
+  async function loadMe() {
+    const r = await sbRpc('my_access'); const j = await sbJson(r);
+    if (!r.ok) throw new Error(sbErr(j));
+    AUTH.me = j; AUTH.ok = !!(j && j.has_access); return j;
+  }
+
+  /* shared candle feed: the same calls the Twelve Data connector answers, served from the candles table */
+  function cloudShim() {
+    const iso = (t, d) => new Date(t * 1000).toISOString().slice(0, d ? 10 : 19).replace('T', ' ');
+    let newest = 0;
+    const nope = (msg, code) => Object.assign(new Error(msg), { code: code || 'tool_error' });
+    async function series(input) {
+      const tf = /day/.test(input.interval) ? '1d' : '5m', want = Math.min(+input.outputsize || 30, 5000); let q = '', rows = [];
+      if (input.end_date) q = '&t=lt.' + Math.floor(Date.parse(String(input.end_date).replace(' ', 'T') + (String(input.end_date).length > 10 ? 'Z' : 'T00:00:00Z')) / 1000 + (String(input.end_date).length > 10 ? 1 : 86400));
+      while (rows.length < want) {
+        const n = Math.min(1000, want - rows.length);
+        const r = await sbFetch('/rest/v1/candles?select=t,o,h,l,c&tf=eq.' + tf + q + '&order=t.desc&limit=' + n + '&offset=' + rows.length);
+        const j = await sbJson(r);
+        if (r.status === 401 || r.status === 403) throw nope('Your access has ended.', 'needs_reauth');
+        if (!r.ok) throw nope(sbErr(j), 'server_unavailable');
+        rows = rows.concat(j || []); if (!j || j.length < n) break;
+      }
+      if (!rows.length) throw nope('The shared feed has no candles yet.');
+      newest = Math.max(newest, +rows[0].t);
+      return 'datetime;open;high;low;close\n' + rows.map(b => [iso(+b.t, tf === '1d'), b.o, b.h, b.l, b.c].join(';')).join('\n') + '\n';
+    }
+    const call = async (srv, tool, input) => {
+      input = input || {};
+      if (tool === 'get_time_series') return { payload: { result: await series(input) }, content: [] };
+      if (tool === 'get_quote') { const d = new Date().toISOString().slice(0, 10); return { payload: { result: 'datetime;timestamp;last_quote_at\n' + d + ';' + Math.floor(Date.parse(d + 'T00:00:00Z') / 1000) + ';' + newest + '\n' }, content: [] }; }
+      if (tool === 'get_api_usage') return { payload: { result: 'plan_daily_limit\n5000\n' }, content: [] };
+      throw nope('Unsupported ' + tool);
+    };
+    const watch = (srv, tool, input, h, opts) => {
+      let on = true;
+      const run = async () => { try { h({ type: 'data', result: await call(srv, tool, input) }); } catch (e) { h({ type: 'error', error: e }); } };
+      run(); const id = setInterval(() => { if (on) run(); }, Math.min(opts.refetchInterval, 30000));
+      return () => { on = false; clearInterval(id); };
+    };
+    return { callTool: call, watchTool: watch, rest: true, cloud: true };
+  }
+
+  /* gate screens */
+  const gate = { show(which) { $('#auth').hidden = false; $('#gForms').hidden = which !== 'forms'; $('#gLocked').hidden = which !== 'locked'; }, hide() { $('#auth').hidden = true; } };
+  function gmsg(t, c) { const m = $('#gMsg'); m.textContent = t || ''; m.className = 'gmsg ' + (c || ''); }
+  function setMode(m) {
+    AUTH.mode = m; const up = m === 'up';
+    $('#gtIn').setAttribute('aria-pressed', String(!up)); $('#gtUp').setAttribute('aria-pressed', String(up));
+    $('#fName').hidden = !up; $('#fPhone').hidden = !up; $('#gGo').textContent = up ? 'Create account' : 'Sign in';
+    $('#gPass').autocomplete = up ? 'new-password' : 'current-password'; $('#gHint').hidden = !up; gmsg('');
+  }
+  async function submitAuth(ev) {
+    ev.preventDefault(); const email = $('#gEmail').value.trim(), pw = $('#gPass').value, up = AUTH.mode === 'up';
+    $('#gGo').disabled = true; gmsg(up ? 'Creating your account...' : 'Signing in...');
+    try {
+      let r, j;
+      if (up) {
+        r = await fetch(SB_URL + '/auth/v1/signup', { method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email, password: pw, data: { full_name: $('#gName').value.trim(), phone: $('#gPhone').value.trim() } }) });
+        j = await sbJson(r); if (!r.ok) throw new Error(sbErr(j));
+        if (!j.access_token) { gmsg('Account created. Open the confirmation email we sent, then sign in here.', 'ok'); setMode('in'); gmsg('Account created. Open the confirmation email we sent, then sign in here.', 'ok'); return; }
+      } else {
+        r = await fetch(SB_URL + '/auth/v1/token?grant_type=password', { method: 'POST', headers: { apikey: SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email, password: pw }) });
+        j = await sbJson(r); if (!r.ok) throw new Error(/invalid login/i.test(sbErr(j)) ? 'Wrong email or password.' : sbErr(j));
+      }
+      sbSet(j); $('#gPass').value = ''; await loadMe(); route();
+    } catch (e) { gmsg(e.message, 'err'); }
+    finally { $('#gGo').disabled = false; }
+  }
+  function leftText(ms) { const h = Math.floor(ms / 3600000); return h >= 48 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h >= 1 ? h + 'h ' + Math.floor(ms % 3600000 / 60000) + 'm' : Math.max(1, Math.floor(ms / 60000)) + 'm'; }
+  function planChip() {
+    const c = $('#planChip'), m = AUTH.me; if (!AUTH.on || !m) { c.hidden = true; return; }
+    c.hidden = false; $('#acctOpen').hidden = false; $('#signOut').hidden = false; $('#adminOpen').hidden = m.role !== 'admin';
+    if (m.role === 'admin') { c.textContent = 'Admin'; c.className = 'chip ok'; }
+    else if (m.status === 'trial') { const ms = Date.parse(m.trial_ends_at) - Date.now(); c.textContent = 'Trial ' + leftText(ms) + ' left'; c.className = 'chip ' + (ms < 6 * 3600000 ? 'bad' : 'warn'); }
+    else if (m.status === 'active') { c.textContent = m.paid_until ? 'Active until ' + dshort(m.paid_until) : 'Active'; c.className = 'chip ok'; }
+    else { c.textContent = m.status; c.className = 'chip bad'; }
+  }
+  function showLocked() {
+    stopWatch(); closeWs(); AUTH.started = false; const m = AUTH.me || {};
+    $('#gLockMsg').innerHTML = m.status === 'blocked' ? 'This account is blocked. Contact the admin.' : m.status === 'trial' ? 'Your 2 day free trial has ended.' : 'Your access has ended.';
+    $('#gPay').textContent = PAY_INFO || 'Pay by M-Pesa, then send the admin your registered email (' + (m.email || '') + ') with the M-Pesa message. Access is switched on once the payment is checked.';
+    $('#gLockStat').textContent = ''; gate.show('locked'); planChip();
+  }
+  function route() {
+    if (!AUTH.sess || !AUTH.me) { gate.show('forms'); setMode(AUTH.mode); return; }
+    if (!AUTH.ok) { showLocked(); return; }
+    gate.hide(); planChip(); startApp();
+  }
+
+  /* saved settings follow the user across devices */
+  let lastSaved = '';
+  const curSettings = () => ({ tf: st.tf, ct: st.ct, ema: st.ema, tv: st.tv, alerts: st.alerts });
+  async function loadSettings() {
+    try {
+      const r = await sbFetch('/rest/v1/user_settings?select=data'), j = await sbJson(r), d = j && j[0] && j[0].data;
+      if (d) {
+        if (d.ct) { st.ct = d.ct; ls.set('xau.ct', d.ct); } if (typeof d.ema === 'boolean') { st.ema = d.ema; ls.set('xau.ema', d.ema ? '1' : '0'); }
+        if (typeof d.tv === 'boolean') { st.tv = d.tv; ls.set('xau.tv3', d.tv ? '1' : '0'); }
+        if (d.tf) st.pendTf = d.tf;
+        if (d.alerts === false && st.alerts) { st.alerts = false; $('#alerts').textContent = 'Muted'; }
+        syncView();
+      }
+      lastSaved = JSON.stringify(curSettings());
+    } catch (e) {}
+  }
+  async function saveSettings() {
+    const s = JSON.stringify(curSettings()); if (!AUTH.on || !AUTH.sess || s === lastSaved) return; lastSaved = s;
+    try { await sbFetch('/rest/v1/user_settings', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ user_id: AUTH.sess.user.id, data: JSON.parse(s), updated_at: new Date().toISOString() }) }); } catch (e) {}
+  }
+  async function startApp() {
+    if (AUTH.started) return; AUTH.started = true;
+    $('#keyBox').hidden = true;
+    await loadSettings(); connectLive();
+  }
+  function bootAccounts() {
+    if (!AUTH.on) { connectLive(); return; }
+    (async () => {
+      try { AUTH.sess = JSON.parse(ls.get(SKEY) || 'null'); } catch (e) { AUTH.sess = null; }
+      if (AUTH.sess) { try { await loadMe(); } catch (e) { if (!AUTH.sess) AUTH.me = null; } }
+      route();
+    })();
+    setInterval(saveSettings, 4000);
+    setInterval(async () => { if (!AUTH.sess) return; try { await loadMe(); } catch (e) { return; } planChip(); if (!AUTH.ok) showLocked(); else if (!AUTH.started) route(); }, 180000);
+    setInterval(planChip, 60000);
+  }
+
+  /* journal + signal history */
+  let jRows = [];
+  const dirOf = s => s === 'buy' ? 1 : -1;
+  const rOf = r => (r.exit_price == null || r.entry == null || r.sl == null || r.entry === r.sl) ? null : (r.exit_price - r.entry) * dirOf(r.side) / Math.abs(r.entry - r.sl);
+  function jStats() {
+    const done = jRows.map(rOf).filter(x => x !== null); let w = 0, gw = 0, gl = 0, tot = 0, peak = 0, dd = 0;
+    done.slice().reverse().forEach(x => { tot += x; if (tot > peak) peak = tot; if (peak - tot > dd) dd = peak - tot; if (x > 0) { w++; gw += x; } else gl -= x; });
+    const n = done.length, t = [['Closed trades', n + ''], ['Win rate', n ? Math.round(w / n * 100) + '%' : '-'], ['Average R', n ? sgn(tot / n) : '-'], ['Total R', n ? sgn(tot) : '-'], ['Profit factor', n ? (gl > 0 ? (gw / gl).toFixed(2) : gw > 0 ? 'n/a' : '0.00') : '-'], ['Max drawdown', n ? (dd > 0 ? '-' : '') + dd.toFixed(2) + 'R' : '-'], ['Open', jRows.length - n + '']];
+    $('#jStats').innerHTML = t.map(x => '<div class="st"><span class="lbl">' + x[0] + '</span><div class="v">' + x[1] + '</div></div>').join('');
+  }
+  function jRender() {
+    jStats();
+    $('#jTable').innerHTML = '<tr><th>Opened</th><th>TF</th><th>Side</th><th>Strategy</th><th>Entry</th><th>Stop</th><th>Exit</th><th>R</th><th>Note</th><th></th></tr>' + (jRows.length ? jRows.map(r => { const R = rOf(r); return '<tr><td>' + esc(stampL(Date.parse(r.opened_at) / 1000)) + '</td><td>' + esc(r.tf || '') + '</td><td class="' + (r.side === 'buy' ? 'up' : 'dn') + '">' + esc(r.side) + '</td><td>' + esc(r.strat || '') + '</td><td>' + (r.entry == null ? '' : fmt(+r.entry)) + '</td><td>' + (r.sl == null ? '' : fmt(+r.sl)) + '</td><td>' + (r.exit_price == null ? 'open' : fmt(+r.exit_price)) + '</td><td class="' + (R === null ? '' : R >= 0 ? 'up' : 'dn') + '">' + (R === null ? '' : sgn(R)) + '</td><td>' + esc(r.note || '') + '</td><td><button class="btn tiny" data-del="' + r.id + '" type="button">Delete</button></td></tr>'; }).join('') : '<tr><td colspan="10" class="mute">No trades logged yet.</td></tr>');
+  }
+  async function jLoad() {
+    try { const r = await sbFetch('/rest/v1/journal?select=*&order=opened_at.desc&limit=300'), j = await sbJson(r); jRows = r.ok && j ? j : []; } catch (e) { jRows = []; }
+    jRender();
+  }
+  async function jAddRow() {
+    const num = id => { const v = $(id).value.trim(); return v === '' ? null : +v; }, m = $('#jMsg');
+    const row = { side: $('#jSide').value, tf: $('#jTf').value, strat: $('#jStrat').value.trim() || null, entry: num('#jEntry'), sl: num('#jSl'), exit_price: num('#jExit'), note: $('#jNote').value.trim() || null };
+    if (row.entry === null || row.sl === null || row.entry === row.sl) { m.textContent = 'Enter an entry and a different stop loss.'; return; }
+    m.textContent = 'Saving...';
+    const r = await sbFetch('/rest/v1/journal', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(row) });
+    if (!r.ok) { m.textContent = sbErr(await sbJson(r)); return; }
+    ['#jStrat', '#jEntry', '#jSl', '#jExit', '#jNote'].forEach(i => { $(i).value = ''; }); m.textContent = 'Saved.'; jLoad();
+  }
+  function jUseSignal() {
+    const o = getOpen(st.tf, E.S.cursor), m = $('#jMsg'); if (!o) { m.textContent = 'There is no open signal on ' + E.LABEL[st.tf] + ' right now.'; return; }
+    $('#jSide').value = o.side === 1 ? 'buy' : 'sell'; $('#jTf').value = String(st.tf); $('#jStrat').value = o.strat || o.trigger || ''; $('#jEntry').value = (+o.entry).toFixed(2); $('#jSl').value = (+o.sl).toFixed(2); m.textContent = 'Filled from the current signal. Add the exit price when you close the trade.';
+  }
+  function hRender() {
+    const m = +$('#hTf').value, rows = E.closedAt(m, E.S.cursor).slice(-80).reverse(), open = E.openAt(m, E.S.cursor);
+    const row = (t, isOpen) => '<tr><td>' + esc(stampL(t.sigT)) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'Buy' : 'Sell') + '</td><td>' + esc(SNAME[t.strat] || t.strat || '') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.sl) + '</td><td>' + t.tp.map(x => fmt(x, 0)).join(' / ') + '</td><td>' + (isOpen ? 'open' : esc(t.exitK)) + '</td><td class="' + (isOpen ? '' : t.R >= 0 ? 'up' : 'dn') + '">' + (isOpen ? '' : sgn(t.R)) + '</td></tr>';
+    $('#hTable').innerHTML = '<tr><th>Signal time</th><th>Side</th><th>Strategy</th><th>Entry</th><th>Stop</th><th>TP1 / TP2 / TP3</th><th>Exit</th><th>R</th></tr>' + (open ? row(open, true) : '') + (rows.length ? rows.map(t => row(t, false)).join('') : '<tr><td colspan="8" class="mute">No closed signals on this timeframe in the loaded data.</td></tr>');
+  }
+  function openAcct() {
+    $('#mAcct').hidden = false; $('#acctWho').textContent = AUTH.me ? AUTH.me.email : '';
+    const opts = E.S.list.map(m => '<option value="' + m + '">' + E.LABEL[m] + '</option>').join('');
+    $('#jTf').innerHTML = opts; $('#hTf').innerHTML = opts; $('#jTf').value = String(st.tf); $('#hTf').value = String(st.tf);
+    if (AUTH.on) jLoad(); else { jRows = []; jRender(); $('#jMsg').textContent = 'Sign-in is only used outside Claude, so the journal is empty here.'; }
+    hRender();
+  }
+  function tabs(which) { $('#paneJ').hidden = which !== 'J'; $('#paneH').hidden = which !== 'H'; $('#tabJ').setAttribute('aria-pressed', String(which === 'J')); $('#tabH').setAttribute('aria-pressed', String(which === 'H')); if (which === 'H') hRender(); }
+
+  /* admin */
+  let aRows = [];
+  const statusChip = u => { const live = u.has_access; const label = u.role === 'admin' ? 'admin' : u.status === 'blocked' ? 'blocked' : !live ? 'expired' : u.status; return '<span class="chip ' + (label === 'admin' || label === 'active' ? 'ok' : label === 'trial' ? 'warn' : 'bad') + '">' + label + '</span>'; };
+  function aRender() {
+    const q = $('#aFind').value.trim().toLowerCase(), now = Date.now();
+    const rows = aRows.filter(u => !q || [u.email, u.full_name, u.phone].join(' ').toLowerCase().indexOf(q) >= 0);
+    $('#aTable').innerHTML = '<tr><th>User</th><th>Phone</th><th>Status</th><th>Trial ends</th><th>Paid until</th><th>Joined</th><th>Trades</th><th></th></tr>' + rows.map(u => '<tr><td>' + esc(u.email) + '<div class="mute" style="font-size:10.5px">' + esc(u.full_name || '') + '</div></td><td>' + esc(u.phone || '') + '</td><td>' + statusChip(u) + '</td><td>' + dshort(u.trial_ends_at) + '</td><td>' + dshort(u.paid_until) + '</td><td>' + dshort(u.created_at) + '</td><td>' + u.journal_count + '</td><td>' + (u.role === 'admin' ? '' : '<button class="btn tiny gold" data-a="grant" data-id="' + u.id + '" type="button">Paid +days</button> <button class="btn tiny" data-a="trial" data-id="' + u.id + '" type="button">+Trial</button> <button class="btn tiny" data-a="' + (u.status === 'blocked' ? 'unblock' : 'block') + '" data-id="' + u.id + '" type="button">' + (u.status === 'blocked' ? 'Unblock' : 'Block') + '</button>') + '</td></tr>').join('');
+    const n = aRows.length, tr = aRows.filter(u => u.role !== 'admin' && u.status === 'trial' && u.has_access).length, ac = aRows.filter(u => u.role !== 'admin' && u.status === 'active' && u.has_access).length, ex = aRows.filter(u => u.role !== 'admin' && !u.has_access).length;
+    $('#aStats').innerHTML = [['Users', n], ['On trial', tr], ['Paid and active', ac], ['Expired or blocked', ex]].map(x => '<div class="st"><span class="lbl">' + x[0] + '</span><div class="v">' + x[1] + '</div></div>').join('') + '<div class="st" id="aFeed"><span class="lbl">Candle feed</span><div class="v" style="font-size:13px">checking</div></div>';
+    aFeed();
+  }
+  async function aFeed() {
+    try {
+      const r = await sbFetch('/rest/v1/feed_status?select=*&id=eq.1'), j = await sbJson(r), f = j && j[0], el = $('#aFeed .v'); if (!el) return;
+      if (!f || !f.last_sync) { el.innerHTML = '<span class="dn">Not running. Add the Twelve Data key in Supabase.</span>'; return; }
+      const age = Math.round((Date.now() - Date.parse(f.last_sync)) / 60000);
+      el.innerHTML = f.last_error ? '<span class="dn">Error: ' + esc(String(f.last_error).slice(0, 60)) + '</span>' : '<span class="' + (age > 10 && marketOpen(Date.now() / 1000) ? 'dn' : 'up') + '">Synced ' + age + 'm ago</span> <span class="mute">' + f.requests_today + ' requests today</span>';
+    } catch (e) {}
+  }
+  async function aLoad() {
+    $('#aMsg').textContent = 'Loading...';
+    const r = await sbRpc('admin_user_list'), j = await sbJson(r);
+    if (!r.ok) { $('#aMsg').textContent = sbErr(j); return; }
+    aRows = j || []; $('#aMsg').textContent = ''; aRender();
+  }
+  async function aAct(a, id) {
+    let r;
+    if (a === 'grant') { const d = prompt('Payment confirmed. How many days of access to add?', '30'); if (!d || !(+d > 0)) return; const note = prompt('Note (for example the M-Pesa code)', '') || null; r = await sbRpc('admin_grant', { target: id, days: Math.round(+d), note_text: note }); }
+    else if (a === 'trial') { const d = prompt('Days of free trial to add?', '2'); if (!d || !(+d > 0)) return; r = await sbRpc('admin_extend_trial', { target: id, days: Math.round(+d) }); }
+    else if (a === 'block') { if (!confirm('Block this user?')) return; r = await sbRpc('admin_set_status', { target: id, new_status: 'blocked' }); }
+    else if (a === 'unblock') { const u = aRows.find(x => x.id === id); r = await sbRpc('admin_set_status', { target: id, new_status: u && u.paid_until && Date.parse(u.paid_until) > Date.now() ? 'active' : 'expired' }); }
+    if (r && !r.ok) { $('#aMsg').textContent = sbErr(await sbJson(r)); return; }
+    aLoad();
+  }
+
+  $('#gtIn').onclick = () => setMode('in'); $('#gtUp').onclick = () => setMode('up'); $('#gForm').onsubmit = submitAuth;
+  const doOut = async () => { try { if (AUTH.sess) await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {} stopWatch(); closeWs(); sbClear(); AUTH.started = false; $('#mAcct').hidden = true; $('#mAdmin').hidden = true; $('#planChip').hidden = true; $('#acctOpen').hidden = true; $('#adminOpen').hidden = true; $('#signOut').hidden = true; setMode('in'); gate.show('forms'); };
+  $('#signOut').onclick = doOut; $('#gOut').onclick = doOut;
+  $('#gRecheck').onclick = async () => { $('#gLockStat').textContent = 'Checking...'; try { await loadMe(); if (AUTH.ok) route(); else { $('#gLockStat').textContent = 'Not active yet. The admin switches you on after checking the payment.'; planChip(); } } catch (e) { $('#gLockStat').textContent = e.message; } };
+  $('#acctOpen').onclick = openAcct; $('#tabJ').onclick = () => tabs('J'); $('#tabH').onclick = () => tabs('H'); $('#hTf').onchange = hRender;
+  $('#jUse').onclick = jUseSignal; $('#jAdd').onclick = jAddRow;
+  $('#jTable').addEventListener('click', async e => { const b = e.target.closest('[data-del]'); if (!b) return; if (!confirm('Delete this trade?')) return; await sbFetch('/rest/v1/journal?id=eq.' + b.dataset.del, { method: 'DELETE' }); jLoad(); });
+  $('#adminOpen').onclick = () => { $('#mAdmin').hidden = false; aLoad(); }; $('#aRefresh').onclick = aLoad; $('#aFind').oninput = aRender;
+  $('#aTable').addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b) aAct(b.dataset.a, b.dataset.id); });
+  if (!AUTH.on) $('#acctOpen').hidden = false;
+
   syncView();
   loadDemo();
-  connectLive();
+  bootAccounts();
 })();
 </script>
 

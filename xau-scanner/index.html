@@ -273,7 +273,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       </div>
       <div class="tblwrap" style="margin-top:12px"><table class="t" id="split"></table></div>
       <div class="lbl" style="margin:14px 0 6px">Strategy scoreboard (real gold data, 15m to 4H, costs included)</div><div class="tblwrap"><table class="t" id="board"></table></div>
-      <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
+      <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. Gated set: on real data the combined 15m and 1H results beat the old all-strategies mix (35R against 29R over 7 weeks to 7 months), but the choice was made on the same data. Strategies that lost are switched off and show as off. Under 15m the engine is about break-even after costs, so treat 1m and 5m alerts as unproven. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
       <p class="assump">Method: a router reads ADX(14). Below 20 the market counts as ranging and the mean reversion group runs (RSI(2), Bollinger fade, day-average reversion, range fade) with sweeps and divergence. At 25 or more it counts as trending and the order block, EMA pullback, breakout retest and Fibonacci setups run. Between 20 and 25 the sweep, divergence, spike fade, opening range, Fibonacci and EMA setups run. Each setup needs 3 of 5 confluence points (4H bias, 1H structure, key level or gap, momentum, clean candle) and must fall between 07:30 and 17:00 UTC. The short-term and counter-trend signals from before are kept. Entry is a limit order at the signal bar close and must trade on the next bar. A third exits at each of TP1, TP2 and TP3 priced from the strategy rules, the stop moves to entry after TP1 and to TP1 after TP2, costs are $0.30 per ounce, the stop counts first when a bar touches both, and trades time out after the strategy time limit. No news calendar is connected, so the news blackout is not applied and the spike fade is a pattern rule. Day average uses typical price without volume.</p>
     </div>
   </div>
@@ -528,6 +528,9 @@ const makeEngine = function () {
   /* ---------- signal ---------- */
   const GROUPS = { range: ['rsi2', 'bb', 'vwap', 'range', 'sweep', 'div', 'rev'], neutral: ['sweep', 'div', 'news', 'orb', 'fib', 'ema', 'lt', 'rev'], trend: ['ob', 'ema', 'brk', 'fib', 'orb', 'lt', 'sweep'] };
   P.enabled = null; // null = every strategy allowed
+  // Per-strategy minimum timeframe in minutes, from the backtest scoreboard. A strategy missing from the map is off.
+  // Off because they lost money on real gold data: RSI(2), Fibonacci, opening range, short-term trend, and the Bollinger, VWAP, range and spike rules that almost never fired.
+  P.mt = { sweep: 1, ema: 1, div: 60, rev: 60, brk: 60, ob: 60 };
   function runStrat(id, tf, i, cur) {
     const sig = STRAT_FN[id](tf, i, cur); if (!sig) return null;
     sig.strat = id; sig.maxBars = sig.maxBars || SID[id].maxBars;
@@ -537,6 +540,7 @@ const makeEngine = function () {
       sig.reasons = sig.reasons.concat(c.why);
     } else sig.conf = null;
     if (P.minConf && sig.conf !== null && sig.conf < P.minConf) return null;
+    if (tf.m < 15) sig.reasons.push('Under 15m: no proven edge after costs, size small');
     return sig;
   }
   function evalSignal(tf, i, cur) {
@@ -545,6 +549,7 @@ const makeEngine = function () {
     const ids = P.only ? P.only : (P.router ? GROUPS[regimeOf(tf, i)] : STRATS.map(s => s.id));
     for (const id of ids) {
       if (!P.only && P.enabled && P.enabled.indexOf(id) < 0) continue;
+      if (!P.only && P.mt && tf.m < (P.mt[id] === undefined ? Infinity : P.mt[id])) continue;
       const s = runStrat(id, tf, i, cur); if (s) return s;
     }
     return null;
@@ -1760,8 +1765,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
 
   /* ---------- backtest modal ---------- */
   const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal"};
+  function SN(id) { const m = E.P.mt && E.P.mt[id]; return SNAME[id] + (m === undefined ? ' (off)' : m > 1 ? ' (on, ' + E.LABEL[m] + '+)' : ' (on)'); }
   function renderBoard() {
-    const rows = BOARD.map(b => { if (!b.n) return '<tr><td>' + SNAME[b.id] + '</td><td colspan="8">no setups found in the data</td></tr>'; const ok = b.pf > 1.3 && b.exp > 0 && b.n >= 100 && b.oosPf > 1.3; return '<tr><td>' + SNAME[b.id] + '</td><td>' + b.n + '</td><td>' + b.wr + '%</td><td>' + (b.exp > 0 ? '+' : '') + b.exp + 'R</td><td class="' + (b.pf >= 1 ? 'up' : 'dn') + '">' + b.pf + '</td><td>-' + b.dd + 'R</td><td>' + b.ml + '</td><td>' + b.oosPf + '</td><td class="' + (ok ? 'up' : 'dn') + '">' + (ok ? 'Pass' : 'Not yet') + '</td></tr>'; }).join('');
+    const rows = BOARD.map(b => { if (!b.n) return '<tr><td>' + SN(b.id) + '</td><td colspan="8">no setups found in the data</td></tr>'; const ok = b.pf > 1.3 && b.exp > 0 && b.n >= 100 && b.oosPf > 1.3; return '<tr><td>' + SN(b.id) + '</td><td>' + b.n + '</td><td>' + b.wr + '%</td><td>' + (b.exp > 0 ? '+' : '') + b.exp + 'R</td><td class="' + (b.pf >= 1 ? 'up' : 'dn') + '">' + b.pf + '</td><td>-' + b.dd + 'R</td><td>' + b.ml + '</td><td>' + b.oosPf + '</td><td class="' + (ok ? 'up' : 'dn') + '">' + (ok ? 'Pass' : 'Not yet') + '</td></tr>'; }).join('');
     $('#board').innerHTML = '<tr><th>Strategy</th><th>Trades</th><th>Win</th><th>Avg R</th><th>PF</th><th>Max DD</th><th>Worst streak</th><th>PF 2nd half</th><th>Rule</th></tr>' + rows;
   }
   function riskGuard() {

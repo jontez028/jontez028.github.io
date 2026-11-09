@@ -521,7 +521,8 @@ const makeEngine = function () {
       if (k !== key) { if (cur) out.push(cur); key = k; cur = { t: b.t, o: b.o, h: b.h, l: b.l, c: b.c, start: i, end: i }; }
       else { if (b.h > cur.h) cur.h = b.h; if (b.l < cur.l) cur.l = b.l; cur.c = b.c; cur.end = i; }
     }
-    if (cur) out.push(cur);
+    // The last group may still be forming. Count it as done only when its period has fully elapsed, the way the backtest sees it.
+    if (cur) { const lastT = base[base.length - 1].t + baseMin * 60, per = cur.t - (((cur.t - off) % sec) + sec) % sec + sec; if (per > lastT) cur.end = base.length + 1e9; out.push(cur); }
     return out;
   }
   function ema(v, p) { const k = 2 / (p + 1), o = new Array(v.length); let e = v[0]; for (let i = 0; i < v.length; i++) { e = i ? v[i] * k + e * (1 - k) : v[0]; o[i] = e; } return o; }

@@ -302,7 +302,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       </div>
       <div class="tblwrap" style="margin-top:12px"><table class="t" id="split"></table></div>
       <div class="lbl" style="margin:14px 0 6px">Strategy scoreboard (real gold data, 15m to 4H, costs included)</div><div class="tblwrap"><table class="t" id="board"></table></div>
-      <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. Gated set: on real data the combined 15m and 1H results beat the old all-strategies mix (35R against 29R over 7 weeks to 7 months), but the choice was made on the same data and the larger pooled scoreboard below shows the kept strategies near break-even, so expect a small edge at best. Strategies that lost are switched off and show as off. Under 15m the engine is about break-even after costs, so treat 1m and 5m alerts as unproven. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
+      <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. Tests redone after fixing a timestamp error: the router mix is slightly negative on 15m and 1H (profit factor about 0.85 to 0.9, 7 weeks to 7 months). Sweep and EMA pullback setups on 5m were slightly positive over 22 days (profit factor 1.1 to 1.4, about 100 trades) but that sample is short. Under 15m the cost per trade is large, so treat 1m and 5m alerts as unproven. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
       <p class="assump">Method: a router reads ADX(14). Below 20 the market counts as ranging and the mean reversion group runs (RSI(2), Bollinger fade, day-average reversion, range fade) with sweeps and divergence. At 25 or more it counts as trending and the order block, EMA pullback, breakout retest and Fibonacci setups run. Between 20 and 25 the sweep, divergence, spike fade, opening range, Fibonacci and EMA setups run. Each setup needs 3 of 5 confluence points (4H bias, 1H structure, key level or gap, momentum, clean candle) and must fall between 07:30 and 17:00 UTC. The short-term and counter-trend signals from before are kept. Entry is a limit order at the signal bar close and must trade on the next bar. A third exits at each of TP1, TP2 and TP3 priced from the strategy rules, the stop moves to entry after TP1 and to TP1 after TP2, costs are $0.30 per ounce, the stop counts first when a bar touches both, and trades time out after the strategy time limit. No news calendar is connected, so the news blackout is not applied and the spike fade is a pattern rule. Day average uses typical price without volume.</p>
     </div>
   </div>
@@ -623,9 +623,9 @@ const makeEngine = function () {
   /* ---------- signal ---------- */
   const GROUPS = { range: ['rsi2', 'bb', 'vwap', 'range', 'sweep', 'div', 'rev'], neutral: ['sweep', 'div', 'news', 'orb', 'fib', 'ema', 'lt', 'rev'], trend: ['ob', 'ema', 'brk', 'fib', 'orb', 'lt', 'sweep'] };
   P.enabled = null; // null = every strategy allowed
-  // Per-strategy minimum timeframe in minutes, from the backtest scoreboard. A strategy missing from the map is off.
-  // Off because they lost money on real gold data: RSI(2), Fibonacci, opening range, short-term trend, and the Bollinger, VWAP, range and spike rules that almost never fired.
-  P.mt = { sweep: 1, ema: 1, div: 60, rev: 60, brk: 60, ob: 60 };
+  // Optional per-strategy minimum timeframe in minutes (strategy missing from the map is off). null = no gate.
+  // Left off: after fixing a timestamp error in my tests, no strategy shows a proven edge on 15m or 1H.
+  P.mt = null;
   function runStrat(id, tf, i, cur) {
     const sig = STRAT_FN[id](tf, i, cur); if (!sig) return null;
     sig.strat = id; sig.maxBars = sig.maxBars || SID[id].maxBars;

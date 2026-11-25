@@ -1,0 +1,17 @@
+{
+  "name": "XAUUSD Scanner",
+  "short_name": "XAU Scanner",
+  "description": "Live gold signals with entries, three targets and a stop. Alerts on your phone.",
+  "id": "/xau-scanner/",
+  "start_url": "/xau-scanner/",
+  "scope": "/xau-scanner/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#090c11",
+  "theme_color": "#090c11",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

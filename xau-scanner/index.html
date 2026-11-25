@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#090c11">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="XAU Scanner">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>html{color-scheme:dark;background:#090c11}body{margin:0}[hidden]{display:none!important}</style>
 </head>
 <body>
@@ -280,6 +288,8 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       <span class="chip" id="planChip" hidden></span>
       <button class="btn" id="acctOpen" type="button" hidden>Journal</button>
       <button class="btn gold" id="adminOpen" type="button" hidden>Admin</button>
+      <button class="btn" id="installApp" type="button" hidden>Install app</button>
+      <button class="btn gold" id="phoneAlerts" type="button" hidden>Phone alerts</button>
       <button class="btn" id="signOut" type="button" hidden>Sign out</button>
       <button class="btn" id="alerts" type="button">Alerts on</button>
       <button class="btn" id="testSig" type="button" title="Draws a made-up trade and fires the alert, to check they work">Test signal</button>
@@ -2068,7 +2078,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function leftText(ms) { const h = Math.floor(ms / 3600000); return h >= 48 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h >= 1 ? h + 'h ' + Math.floor(ms % 3600000 / 60000) + 'm' : Math.max(1, Math.floor(ms / 60000)) + 'm'; }
   function planChip() {
     const c = $('#planChip'), m = AUTH.me; if (!AUTH.on || !m) { c.hidden = true; return; }
-    c.hidden = false; $('#acctOpen').hidden = false; $('#signOut').hidden = false; $('#adminOpen').hidden = m.role !== 'admin';
+    c.hidden = false; $('#acctOpen').hidden = false; $('#signOut').hidden = false; if (window.paRefresh) { $('#phoneAlerts').hidden = false; window.paRefresh(); } $('#adminOpen').hidden = m.role !== 'admin';
     if (m.role === 'admin') { c.textContent = 'Admin'; c.className = 'chip ok'; }
     else if (m.status === 'trial') { const ms = Date.parse(m.trial_ends_at) - Date.now(); c.textContent = 'Trial ' + leftText(ms) + ' left'; c.className = 'chip ' + (ms < 6 * 3600000 ? 'bad' : 'warn'); }
     else if (m.status === 'active') { c.textContent = m.paid_until ? 'Active until ' + dshort(m.paid_until) : 'Active'; c.className = 'chip ok'; }
@@ -2204,7 +2214,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   $('#gtIn').onclick = () => setMode('in'); $('#gtUp').onclick = () => setMode('up'); $('#gForm').onsubmit = submitAuth;
-  const doOut = async () => { try { if (AUTH.sess) await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {} stopWatch(); closeWs(); sbClear(); AUTH.started = false; $('#mAcct').hidden = true; $('#mAdmin').hidden = true; $('#planChip').hidden = true; $('#acctOpen').hidden = true; $('#adminOpen').hidden = true; $('#signOut').hidden = true; setMode('in'); gate.show('forms'); };
+  const doOut = async () => { try { if (AUTH.sess) await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {} stopWatch(); closeWs(); sbClear(); AUTH.started = false; $('#mAcct').hidden = true; $('#mAdmin').hidden = true; $('#planChip').hidden = true; $('#acctOpen').hidden = true; $('#adminOpen').hidden = true; $('#signOut').hidden = true; $('#phoneAlerts').hidden = true; if (window.paClose) window.paClose(); setMode('in'); gate.show('forms'); };
   $('#signOut').onclick = doOut; $('#gOut').onclick = doOut;
   $('#gRecheck').onclick = async () => { $('#gLockStat').textContent = 'Checking...'; try { await loadMe(); if (AUTH.ok) route(); else { $('#gLockStat').textContent = 'Not active yet. The admin switches you on after checking the payment.'; planChip(); } } catch (e) { $('#gLockStat').textContent = e.message; } };
   $('#acctOpen').onclick = openAcct; $('#tabJ').onclick = () => tabs('J'); $('#tabH').onclick = () => tabs('H'); $('#hTf').onchange = hRender;
@@ -2213,6 +2223,77 @@ if (typeof module !== 'undefined') module.exports = Engine;
   $('#adminOpen').onclick = () => { $('#mAdmin').hidden = false; aLoad(); }; $('#aRefresh').onclick = aLoad; $('#aFind').oninput = aRender;
   $('#aTable').addEventListener('click', e => { const b = e.target.closest('[data-a]'); if (b) aAct(b.dataset.a, b.dataset.id); });
   if (!AUTH.on) $('#acctOpen').hidden = false;
+
+  /* ---------- phone app: install + push alerts ---------- */
+  const VAPID_PUBLIC = 'BPuEFsMuAwRUkuzcZu7yguZwd-oeaMKJ-5bfBPihqBHd59lynfmFgrdaa4YP2cxLl8vamXeLiAMEymoSmNW6aiw';
+  (function () {
+    if (!AUTH.on) return;
+    const standalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    let swReg = null, deferred = null;
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      navigator.serviceWorker.register('sw.js').then(r => { swReg = r; }).catch(() => {});
+    }
+    // Install button: Chrome and Edge on Android and desktop offer it through this event
+    window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; if (!standalone()) $('#installApp').hidden = false; });
+    window.addEventListener('appinstalled', () => { deferred = null; $('#installApp').hidden = true; });
+    if (isIos && !standalone()) $('#installApp').hidden = false;   // iPhone: shows the Add to Home Screen steps
+    const b64 = v => { const p = '='.repeat((4 - v.length % 4) % 4), r = atob((v + p).replace(/-/g, '+').replace(/_/g, '/')), o = new Uint8Array(r.length); for (let i = 0; i < r.length; i++) o[i] = r.charCodeAt(i); return o; };
+    const ab = buf => { const a = new Uint8Array(buf); let t = ''; for (let i = 0; i < a.length; i++) t += String.fromCharCode(a[i]); return btoa(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+    const panel = document.createElement('div');
+    panel.id = 'paPanel'; panel.hidden = true;
+    panel.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:80;width:min(440px,calc(100vw - 24px));background:#0f141c;border:1px solid #2b3647;border-radius:8px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.6);font:13px/1.45 "IBM Plex Sans",system-ui,sans-serif;color:#d7dde7';
+    document.body.appendChild(panel);
+    const close = () => { panel.hidden = true; }; window.paClose = close;
+    const show = html => { panel.innerHTML = html + '<div style="margin-top:10px;text-align:right"><button class="btn" id="paX" type="button">Close</button></div>'; panel.hidden = false; panel.querySelector('#paX').onclick = close; };
+    async function current() {
+      if (!canPush) return null;
+      try { const r = swReg || await navigator.serviceWorker.ready; swReg = r; return await r.pushManager.getSubscription(); } catch (e) { return null; }
+    }
+    async function refresh() {
+      const b = $('#phoneAlerts'), sub = await current(), on = !!(sub && Notification.permission === 'granted');
+      b.textContent = on ? 'Phone alerts: on' : 'Phone alerts';
+      b.classList.toggle('gold', !on);
+    }
+    window.paRefresh = refresh;
+    const IOS_STEPS = '<b>iPhone</b>: alerts only work from the home screen app. Open this page in Safari, tap the Share button, choose <b>Add to Home Screen</b>, then open the new icon and tap Phone alerts again. Needs iOS 16.4 or newer.';
+    async function enable() {
+      if (!canPush || (isIos && !standalone())) { show(IOS_STEPS); return; }
+      let perm = Notification.permission;
+      if (perm === 'default') perm = await Notification.requestPermission();
+      if (perm !== 'granted') { show('Notifications are blocked for this site. Allow them in your browser or phone settings (site settings, Notifications), then tap Phone alerts again.'); return; }
+      try {
+        const reg = swReg || await navigator.serviceWorker.ready; swReg = reg;
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(VAPID_PUBLIC) });
+        const r = await sbRpc('register_push', { p_endpoint: sub.endpoint, p_p256dh: ab(sub.getKey('p256dh')), p_auth: ab(sub.getKey('auth')), p_ua: navigator.userAgent });
+        const j = await sbJson(r);
+        if (!r.ok || j !== true) throw new Error(r.ok ? 'Your plan does not include alerts right now.' : sbErr(j));
+        await refresh(); manage('Phone alerts are on. Signals will arrive here even when the app is closed.');
+      } catch (e) { show('Could not turn alerts on: ' + esc(e.message || String(e))); }
+    }
+    function manage(msg) {
+      show('<b>' + (msg || 'Phone alerts are on for this device.') + '</b><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn solid" id="paTest" type="button">Send a test alert</button><button class="btn" id="paOff" type="button">Turn off</button></div><div id="paMsg" class="note" style="margin-top:8px"></div>');
+      panel.querySelector('#paTest').onclick = async () => {
+        const m = panel.querySelector('#paMsg'); m.textContent = 'Sending...';
+        try { const r = await sbFetch('/functions/v1/push-test', { method: 'POST', body: '{}' }); const j = await sbJson(r); m.textContent = r.ok && j && j.ok ? 'Sent. It should show up on this phone within a few seconds.' : (j && j.error) || 'The test could not be sent.'; } catch (e) { m.textContent = 'The test could not be sent.'; }
+      };
+      panel.querySelector('#paOff').onclick = async () => {
+        try { const sub = await current(); if (sub) { const ep = sub.endpoint; await sub.unsubscribe(); await sbFetch('/rest/v1/push_subs?endpoint=eq.' + encodeURIComponent(ep), { method: 'DELETE' }); } } catch (e) {}
+        await refresh(); show('Phone alerts are off for this device.');
+      };
+    }
+    $('#phoneAlerts').addEventListener('click', async () => {
+      if (!panel.hidden) { close(); return; }
+      const sub = await current();
+      if (sub && Notification.permission === 'granted') manage(); else enable();
+    });
+    $('#installApp').addEventListener('click', async () => {
+      if (deferred) { deferred.prompt(); try { await deferred.userChoice; } catch (e) {} deferred = null; $('#installApp').hidden = true; }
+      else if (isIos && !standalone()) show(IOS_STEPS);
+    });
+  })();
 
   syncView();
   loadDemo();

@@ -313,7 +313,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
       <div class="tblwrap" style="margin-top:12px"><table class="t" id="split"></table></div>
       <div class="lbl" style="margin:14px 0 6px">Strategy scoreboard (real gold data, 15m to 4H, costs included)</div><div class="tblwrap"><table class="t" id="board"></table></div>
       <p class="warn">Rule from your list: profit factor above 1.3 in both halves, positive expectancy after costs and at least 100 trades. Tests redone after fixing a timestamp error: the router mix is slightly negative on 15m and 1H (profit factor about 0.85 to 0.9, 7 weeks to 7 months). Sweep and EMA pullback setups on 5m were slightly positive over 22 days (profit factor 1.1 to 1.4, about 100 trades) but that sample is short. Under 15m the cost per trade is large, so treat 1m and 5m alerts as unproven. None of the 14 pass yet on the data available (about 2 years of 1H, 30 weeks of 15m, 18 days of 5m, in separate pieces). Signals use the router, a session filter and a confluence score of 3 to stay selective, and every strategy should be paper traded 4 to 8 weeks first.</p>
-      <p class="assump">Method: a router reads ADX(14). Below 20 the market counts as ranging and the mean reversion group runs (RSI(2), Bollinger fade, day-average reversion, range fade) with sweeps and divergence. At 25 or more it counts as trending and the order block, EMA pullback, breakout retest and Fibonacci setups run. Between 20 and 25 the sweep, divergence, spike fade, opening range, Fibonacci and EMA setups run. Each setup needs 3 of 5 confluence points (4H bias, 1H structure, key level or gap, momentum, clean candle) and must fall between 07:30 and 17:00 UTC. The short-term and counter-trend signals from before are kept. Entry is a limit order at the signal bar close and must trade on the next bar. A third exits at each of TP1, TP2 and TP3 priced from the strategy rules, the stop moves to entry after TP1 and to TP1 after TP2, costs are $0.30 per ounce, the stop counts first when a bar touches both, and trades time out after the strategy time limit. No news calendar is connected, so the news blackout is not applied and the spike fade is a pattern rule. Day average uses typical price without volume.</p>
+      <p class="assump">Method (your strategy spec, Nov 2026): entries are taken only on closed 5m candles. The market is first labelled trend down, trend up or balance (price against a 20 SMA and a 50 EMA and their 12-bar slope). Five setups: 1 range-break retest, 2 compression breakdown, 3 MA rejection, 4 failed-breakdown reclaim (half size), 5 range-edge fade (half size). Filters block entries in the event window (US data and the New York open), the stretch guard, and the dead zone (mid-range or the volume POC). The 15m, 1H and 4H charts do not make entries; they grade each 5m entry A+ (4 or 5 of 5 points), A (3) or B. Stop for the day after 2 losses in a row; New York gets wider stops and half size. Stand-ins: green MA is the 20 SMA, blue MA the 50 EMA, POC the busiest $1 band by time spent there (no volume data), and the US data times are fixed at 08:30 and 10:00 New York time, not a real calendar. Point values are scaled by ATR(14)/5. Only about 17 trading days of 5m data were available, so every number here is a hypothesis.</p>
     </div>
   </div>
 </div>
@@ -635,7 +635,7 @@ const makeEngine = function () {
   // Only the strategies that made money in the signal history (3 Nov to 24 Nov, 79 signals): liquidity sweep +6.3R, Bollinger fade +5.6R, Fibonacci +5.2R.
   // Dropped: EMA pullback (-4.7R, 42% wins), short-term trend (-3.5R, 25% wins), RSI(2) pullback (-0.6R), breakout and opening range (scratches only).
   // To bring one back, add its id here, or set this to null to allow all 14.
-  P.enabled = ['sweep', 'bb', 'fib'];
+  P.enabled = ['s1', 's2', 's3', 's4', 's5'];
   // Optional per-strategy minimum timeframe in minutes (strategy missing from the map is off). null = no gate.
   // Left off: after fixing a timestamp error in my tests, no strategy shows a proven edge on 15m or 1H.
   P.mt = null;
@@ -652,6 +652,7 @@ const makeEngine = function () {
     return sig;
   }
   function evalSignal(tf, i, cur) {
+    if (P.spec) return evalSpec(tf, i, cur);
     if (i < 60) return null;
     if (P.sess) { const h = hourOf(tf.bars[i].t); if (h < 7.5 || h >= 17) return null; }
     const ids = P.only ? P.only : (P.router ? GROUPS[regimeOf(tf, i)] : STRATS.map(s => s.id));
@@ -738,7 +739,12 @@ const makeEngine = function () {
     { id: 'news', n: 'Spike fade (post-news style)', g: 'D', maxBars: 24 },
     { id: 'orb', n: 'Opening range breakout and retest', g: 'D', maxBars: 36 },
     { id: 'lt', n: 'Short-term trend (lower timeframes)', g: 'C', maxBars: 48 },
-    { id: 'rev', n: 'Counter-trend reversal', g: 'D', maxBars: 48 }
+    { id: 'rev', n: 'Counter-trend reversal', g: 'D', maxBars: 48 },
+    { id: 's1', n: 'Range-break retest', g: 'S', maxBars: 36 },
+    { id: 's2', n: 'Compression breakdown', g: 'S', maxBars: 36 },
+    { id: 's3', n: 'MA rejection', g: 'S', maxBars: 36 },
+    { id: 's4', n: 'Failed-breakdown reclaim', g: 'S', maxBars: 36 },
+    { id: 's5', n: 'Range-edge fade', g: 'S', maxBars: 36 }
   ];
   const SID = {}; STRATS.forEach(s => { SID[s.id] = s; });
   const hourOf = t => { const d = new Date(t * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; };
@@ -936,6 +942,184 @@ const makeEngine = function () {
     }
   };
 
+  /* ================= Spec engine: five 5-minute setups (Gold_scanner_strategy_spec) =================
+     Entries are only ever taken on the 5m chart. The 15m, 1H and 4H charts do not make entries; they grade the 5m entry (A+ / A / B).
+     Stand-ins (the spec asks which indicators you use): green MA = 20 SMA, blue MA = 50 EMA, POC = most-traded $1 price band of the last 24h by time at price.
+     Point values in the spec (20 stretch, 5-7 stops, ...) are scaled by ATR(14)/5 because the spec day had a 5m ATR of about 5. */
+  P.spec = 1; P.entryTf = 5;
+  P.sp = { stretch: 20, touchN: 3, t1R: 1.5, dead: 1, ev: 1, nyCut: 1, grade: 0, hours: [0, 21], loseStop: 2 };
+  const SESS = h => h < 7 ? 'Tokyo' : h < 13 ? 'London' : 'New York';
+  const clampN = (x, a, b) => Math.max(a, Math.min(b, x));
+  function specLevels(tf, i) {
+    // highs and lows of the session boxes: finished ones, plus the one in progress (excluding the signal bar), plus yesterday's high/low
+    const b = tf.bars, out = [], seen = {}; const sk = k => { const d = new Date(b[k].t * 1000); return d.getUTCFullYear() * 1000 + d.getUTCMonth() * 40 + d.getUTCDate() + '-' + SESS(d.getUTCHours()); };
+    let key = null, hi = -Infinity, lo = Infinity, firstK = i;
+    const flush = () => { if (key) { out.push({ p: hi, k: 'h', n: key.split('-')[1] + ' high' }); out.push({ p: lo, k: 'l', n: key.split('-')[1] + ' low' }); } };
+    for (let k = i - 1; k >= Math.max(0, i - 700); k--) {
+      const kk = sk(k);
+      if (kk !== key) { flush(); key = kk; hi = -Infinity; lo = Infinity; if (Object.keys(seen).length > 7) { key = null; break; } seen[kk] = 1; }
+      if (b[k].h > hi) hi = b[k].h; if (b[k].l < lo) lo = b[k].l;
+    }
+    if (key) flush();
+    if (!isNaN(tf.pdh[i])) { out.push({ p: tf.pdh[i], k: 'h', n: 'Yesterday high' }); out.push({ p: tf.pdl[i], k: 'l', n: 'Yesterday low' }); }
+    return out;
+  }
+  function specPoc(tf, i) {
+    const b = tf.bars, cnt = {}; let best = null, bc = 0;
+    for (let k = Math.max(0, i - 288); k < i; k++) { const p = Math.round((b[k].h + b[k].l + 2 * b[k].c) / 4); cnt[p] = (cnt[p] || 0) + 1; }
+    for (const p in cnt) { const v = cnt[p] + 0.5 * ((cnt[+p - 1] || 0) + (cnt[+p + 1] || 0)); if (v > bc) { bc = v; best = +p; } }
+    return best;
+  }
+  function eventNear(tf, i) {
+    const t = tf.bars[i].t + 300, d = new Date(t * 1000), w = d.getUTCDay(); if (w < 1 || w > 5) return false;
+    const off = usDst(t * 1000) ? 4 : 5, m = d.getUTCHours() * 60 + d.getUTCMinutes();
+    return [8 * 60 + 30, 9 * 60 + 30, 10 * 60].some(e => Math.abs(m - (e + off * 60)) <= 5); // 08:30 US data, 09:30 New York open, 10:00 data (New York time)
+  }
+  function specCtx(tf, i) {
+    const b = tf.bars, q = b[i], a = tf.atr[i], sc = clampN(a / 5, 0.6, 2), g = tf.bbm[i], bl = tf.e50[i];
+    const gs = g - tf.bbm[i - 12], bs = bl - tf.e50[i - 12];
+    const state = q.c < g && q.c < bl && gs < 0 && bs < 0 ? 'down' : q.c > g && q.c > bl && gs > 0 && bs > 0 ? 'up' : 'balance';
+    let hi = -Infinity, lo = Infinity; for (let k = i - 36; k < i; k++) { if (b[k].h > hi) hi = b[k].h; if (b[k].l < lo) lo = b[k].l; }
+    return { a: a, sc: sc, g: g, bl: bl, gs: gs, bs: bs, state: state, hi: hi, lo: lo, levels: specLevels(tf, i), poc: null };
+  }
+  const rngOf = x => (x.h - x.l) || 1e-9;
+  const wickUp = x => (x.h - Math.max(x.o, x.c)) / rngOf(x), wickDn = x => (Math.min(x.o, x.c) - x.l) / rngOf(x);
+  const bearEng = (x, p) => x.c < x.o && p.c > p.o && x.c < p.o && x.o >= p.c;
+  const bullEng = (x, p) => x.c > x.o && p.c < p.o && x.c > p.o && x.o <= p.c;
+  function specBlockers(tf, i, side, trendSide, cx, entry) {
+    const out = [], q = tf.bars[i];
+    if (P.sp.ev && eventNear(tf, i)) out.push('event window');
+    if (P.sp.stretch && trendSide && (q.c - cx.g) * side < 0 && Math.abs(q.c - cx.g) > P.sp.stretch * cx.sc) out.push('stretch guard');
+    if (P.sp.dead) {
+      const pos = cx.hi > cx.lo ? (q.c - cx.lo) / (cx.hi - cx.lo) : 0.5, poc = specPoc(tf, i);
+      if (cx.hi - cx.lo > 3 * cx.a && pos > 0.35 && pos < 0.65) out.push('dead zone (mid-range)');
+      else if (poc !== null && Math.abs(entry - poc) <= 2.5 * cx.sc) out.push('dead zone (volume POC ' + poc + ')');
+    }
+    return out;
+  }
+  // next target levels beyond the entry in the trade direction: session levels, swing points, round numbers (10s)
+  function specTargets(tf, i, side, entry, cx, minDist) {
+    const b = tf.bars, c = [];
+    cx.levels.forEach(l => { if ((l.p - entry) * side > minDist) c.push({ p: l.p, n: l.n }); });
+    for (let k = i - 3; k >= Math.max(5, i - 200); k--) { if (side === -1 && pivL(b, k, 3, 3) && b[k].l < entry - minDist) c.push({ p: b[k].l, n: 'swing low' }); if (side === 1 && pivH(b, k, 3, 3) && b[k].h > entry + minDist) c.push({ p: b[k].h, n: 'swing high' }); }
+    const r0 = side === 1 ? Math.ceil((entry + minDist) / 10) * 10 : Math.floor((entry - minDist) / 10) * 10;
+    for (let n = 0; n < 6; n++) { const p = r0 + side * 10 * n; c.push({ p: p, n: 'round ' + p }); }
+    c.sort((x, y) => (x.p - y.p) * side); return c;
+  }
+  function specMk(id, no, name, tf, i, side, entry, sl, cx, extraSide, pattern, reasons, opt) {
+    opt = opt || {}; const a = cx.a; let risk = Math.abs(entry - sl);
+    if (!(risk > 0)) return null;
+    risk = Math.max(risk, P.minRisk, 0.45 * a); if (risk > 2 * Math.max(10 * cx.sc, 2 * a)) return null; // stop wider than ~10 points: stand aside
+    const q = tf.bars[i], nyHot = P.sp.nyCut && SESS(new Date(q.t * 1000).getUTCHours()) === 'New York', widen = nyHot ? 1.2 : 1;
+    risk *= widen; sl = entry - side * risk;
+    const cand = specTargets(tf, i, side, entry, cx, P.sp.t1R * risk);
+    if (cand.length < 3) return null;
+    const d1 = Math.abs(cand[0].p - entry), d2 = Math.max(opt.t2 !== undefined ? Math.abs(opt.t2 - entry) : 0, Math.abs(cand[1].p - entry)), d3 = Math.max(Math.abs(cand[2].p - entry), d2 + 0.5 * a);
+    if (d1 < P.sp.t1R * risk) return null;
+    const s = mk(id, tf, i, side, entry, sl, [d1, Math.max(d2, d1 + 0.2 * a), d3], reasons, name); if (!s) return null;
+    s.setupNo = no; s.setupName = name; s.state = cx.state === 'down' ? 'Trend down' : cx.state === 'up' ? 'Trend up' : 'Balance';
+    s.pattern = pattern; s.zone = { lo: Math.min(q.l, q.c), hi: Math.max(q.h, q.c) };
+    s.sizeMul = (no >= 4 ? 0.5 : 1) * (nyHot ? 0.5 : 1);
+    s.tpNames = [cand[0].n, cand[1].n, cand[2].n];
+    s.invalid = opt.invalid !== undefined ? opt.invalid : (side === -1 ? Math.max(cx.g, entry + 0.5 * risk) : Math.min(cx.g, entry - 0.5 * risk));
+    s.blockers = specBlockers(tf, i, side, extraSide, cx, entry);
+    s.status = 'triggered';
+    return s;
+  }
+  function specGrade(tf, i, cur, s) {
+    let pts = 0; const why = [];
+    if (htfDir(cur) === s.side) { pts++; why.push('4H trend agrees'); } else why.push('4H trend against');
+    if (hourDir(cur) === s.side) { pts++; why.push('1H trend agrees'); } else why.push('1H trend against');
+    const t15 = S.tfs[15]; if (t15) { const j = lastDone(t15, cur); if (j > 50) { const d = t15.bars[j].c > t15.e50[j] && t15.e20[j] > t15.e50[j] ? 1 : t15.bars[j].c < t15.e50[j] && t15.e20[j] < t15.e50[j] ? -1 : 0; if (d === s.side) { pts++; why.push('15m trend agrees'); } else why.push('15m trend against'); } }
+    const c = confluence(tf, i, cur, s); // key level + clean candle + momentum
+    if (c.why.some(x => /key level/.test(x))) { pts++; why.push('At a key level'); }
+    if (c.why.some(x => /Clean/.test(x))) { pts++; why.push('Clean signal candle'); }
+    s.conf = pts; s.grade = pts >= 4 ? 'A+' : pts === 3 ? 'A' : 'B'; s.score = Math.min(99, 45 + pts * 10); s.gradeWhy = why;
+    if (fvgNear(tf, i, s.side)) s.score = Math.min(99, s.score + 5);
+    return s;
+  }
+  const SPEC_FN = {
+    s1(tf, i, cur) { // range-break retest (trend side)
+      const cx = specCtx(tf, i); if (cx.state === 'balance') return null; const side = cx.state === 'down' ? -1 : 1, b = tf.bars, q = b[i], p = b[i - 1], a = cx.a;
+      if (side === -1 ? !(q.c < q.o && (wickUp(q) >= 0.5 || bearEng(q, p))) : !(q.c > q.o && (wickDn(q) >= 0.5 || bullEng(q, p)))) return null;
+      const lv = cx.levels.filter(l => (side === -1 ? l.k === 'l' : l.k === 'h'));
+      for (const L of lv) {
+        // a 5m close beyond the level within the last 12 bars, then a pullback that tags the level
+        let brk = -1; for (let k = i - 1; k >= i - 12; k--) { if (side === -1 ? (b[k].c < L.p - 0.2 * a && b[k - 1].c >= L.p - 0.2 * a) : (b[k].c > L.p + 0.2 * a && b[k - 1].c <= L.p + 0.2 * a)) { brk = k; break; } }
+        if (brk < 0 || brk === i - 0) continue;
+        let ok = true; for (let k = brk + 1; k < i; k++) if (side === -1 ? b[k].c > L.p + 0.5 * a : b[k].c < L.p - 0.5 * a) ok = false; if (!ok) continue;
+        const tag = side === -1 ? q.h >= L.p - 0.4 * a && q.h <= L.p + 1.2 * a && q.c < L.p + 0.2 * a : q.l <= L.p + 0.4 * a && q.l >= L.p - 1.2 * a && q.c > L.p - 0.2 * a; if (!tag) continue;
+        const ext = side === -1 ? Math.min.apply(null, b.slice(brk, i).map(x => x.l)) : Math.max.apply(null, b.slice(brk, i).map(x => x.h));
+        const sl = side === -1 ? q.h + 1 * cx.sc : q.l - 1 * cx.sc;
+        return specMk('s1', 1, 'Range-break retest ' + (side === -1 ? 'short' : 'long'), tf, i, side, q.c, sl, cx, true, side === -1 ? (bearEng(q, p) ? 'bearish engulfing' : 'rejection wick') : (bullEng(q, p) ? 'bullish engulfing' : 'rejection wick'), ['Closed beyond the ' + L.n + ' (' + L.p.toFixed(2) + ') and retested it', 'Rejection candle closed at the retest'], { t2: ext, invalid: cx.g });
+      }
+      return null;
+    },
+    s2(tf, i, cur) { // compression breakdown (trend side)
+      const cx = specCtx(tf, i); if (cx.state === 'balance') return null; const side = cx.state === 'down' ? -1 : 1, b = tf.bars, q = b[i], a = cx.a;
+      let L = side === -1 ? Infinity : -Infinity; for (let k = i - 20; k < i; k++) L = side === -1 ? Math.min(L, b[k].l) : Math.max(L, b[k].h);
+      if (side === -1 ? !(q.c < L - 0.1 * a && b[i - 1].c >= L - 0.1 * a) : !(q.c > L + 0.1 * a && b[i - 1].c <= L + 0.1 * a)) return null;
+      const touches = []; for (let k = i - 20; k < i; k++) if (side === -1 ? b[k].l <= L + 0.25 * a : b[k].h >= L - 0.25 * a) { if (!touches.length || k - touches[touches.length - 1] >= 2) touches.push(k); }
+      if (touches.length < P.sp.touchN) return null;
+      const ex = touches.map(k => side === -1 ? b[k].h : b[k].l); let mono = true; for (let n = 1; n < ex.length; n++) if (side === -1 ? ex[n] > ex[n - 1] + 0.3 * a : ex[n] < ex[n - 1] - 0.3 * a) mono = false; if (!mono) return null;
+      if (!(Math.abs(q.c - q.o) >= 0.4 * rngOf(q))) return null;
+      const sl = L + side * -1 * 0 + (side === -1 ? 1.2 * a : -1.2 * a); // back inside the range, about 6 points
+      return specMk('s2', 2, 'Compression breakdown ' + (side === -1 ? 'short' : 'long'), tf, i, side, q.c, sl, cx, true, 'closed ' + (side === -1 ? 'below' : 'above') + ' a level tested ' + touches.length + ' times', ['Level ' + L.toFixed(2) + ' tested ' + touches.length + ' times with ' + (side === -1 ? 'lower highs' : 'higher lows'), '5m close ' + (side === -1 ? 'below' : 'above') + ' it'], { invalid: L + (side === -1 ? 1 : -1) * 0.2 * a });
+    },
+    s3(tf, i, cur) { // MA rejection (trend side, or balance under a falling blue MA)
+      const cx = specCtx(tf, i), b = tf.bars, q = b[i], p = b[i - 1], a = cx.a; let side = 0;
+      if (cx.state === 'down' || (cx.state === 'balance' && cx.bs < 0 && q.c < cx.bl)) side = -1; else if (cx.state === 'up' || (cx.state === 'balance' && cx.bs > 0 && q.c > cx.bl)) side = 1; if (!side) return null;
+      const ma = side === -1 ? Math.max(cx.g, cx.bl) : Math.min(cx.g, cx.bl), near = side === -1 ? Math.min(cx.g, cx.bl) : Math.max(cx.g, cx.bl), overlap = Math.abs(cx.g - cx.bl) <= 0.8 * a;
+      const reach = side === -1 ? q.h >= near - 0.3 * a && q.h <= ma + 1 * a : q.l <= near + 0.3 * a && q.l >= ma - 1 * a; if (!reach) return null;
+      if (side === -1 ? !(q.c < q.o && q.c < near && (wickUp(q) >= 0.4 || bearEng(q, p))) : !(q.c > q.o && q.c > near && (wickDn(q) >= 0.4 || bullEng(q, p)))) return null;
+      let bounce = false; for (let k = i - 8; k < i; k++) if (side === -1 ? b[k].c < near - 0.8 * a : b[k].c > near + 0.8 * a) bounce = true; if (!bounce) return null; // a real bounce up into the MA first
+      const sl = side === -1 ? Math.max(q.h, ma) + 4.5 * cx.sc * 0.5 : Math.min(q.l, ma) - 4.5 * cx.sc * 0.5;
+      return specMk('s3', 3, 'MA rejection ' + (side === -1 ? 'short' : 'long'), tf, i, side, q.c, sl, cx, cx.state !== 'balance', 'rejection at the ' + (overlap ? 'green/blue MA overlap' : 'moving average'), ['Bounce into the moving average (' + near.toFixed(2) + ') rejected'], { invalid: ma + side * -0.3 * a });
+    },
+    s4(tf, i, cur) { // failed breakdown reclaim (long) and its mirror
+      const cx = specCtx(tf, i), b = tf.bars, q = b[i], a = cx.a;
+      for (const side of [1, -1]) {
+        if (side === 1 && cx.state === 'up' && false) continue;
+        if (side === 1 ? !(q.c > q.o && q.c > cx.g) : !(q.c < q.o && q.c < cx.g)) continue;
+        const lv = cx.levels.filter(l => side === 1 ? l.k === 'l' : l.k === 'h');
+        for (const L of lv) {
+          let sw = -1; for (let k = i - 12; k < i - 1; k++) { if (side === 1 ? (b[k].l < L.p - 0.3 * a && b[k + 1].c > L.p) : (b[k].h > L.p + 0.3 * a && b[k + 1].c < L.p)) { sw = k; break; } }
+          if (sw < 0) continue;
+          const pb = Math.min.apply(null, b.slice(i - 3, i + 1).map(x => side === 1 ? x.l : -x.h)) * (side === 1 ? 1 : -1);
+          if (side === 1 ? pb < L.p - 0.2 * a : pb > L.p + 0.2 * a) continue; // pullback must hold the reclaimed level
+          let held = true; for (let k = sw + 2; k < i; k++) if (side === 1 ? b[k].c < L.p - 0.2 * a : b[k].c > L.p + 0.2 * a) held = false; if (!held) continue;
+          if (!(i - sw >= 3)) continue;
+          const sl = pb - side * 5 * cx.sc * 0.6;
+          return specMk('s4', 4, 'Failed-breakdown reclaim ' + (side === 1 ? 'long' : 'short'), tf, i, side, q.c, sl, cx, false, side === 1 ? 'bullish candle holding the reclaimed level' : 'bearish candle under the reclaimed level', ['Swept ' + L.n + ' (' + L.p.toFixed(2) + ') and closed back ' + (side === 1 ? 'above' : 'below') + ' it', 'Then back ' + (side === 1 ? 'above' : 'below') + ' the green MA; half size (against the bigger trend)'], { invalid: L.p - side * 0.2 * a });
+        }
+      }
+      return null;
+    },
+    s5(tf, i, cur) { // range-edge fade (balance only)
+      const cx = specCtx(tf, i); if (cx.state !== 'balance') return null; const b = tf.bars, q = b[i], p = b[i - 1], a = cx.a, H = cx.hi - cx.lo;
+      if (H < 2 * a || H > 6 * a) return null;
+      let side = 0; if (q.h >= cx.hi - 0.15 * H && q.c < q.o && (wickUp(q) >= 0.4 || bearEng(q, p))) side = -1; else if (q.l <= cx.lo + 0.15 * H && q.c > q.o && (wickDn(q) >= 0.4 || bullEng(q, p))) side = 1; if (!side) return null;
+      const edge = side === -1 ? cx.hi : cx.lo, conf = [cx.g, cx.bl].some(m => Math.abs(m - edge) <= 0.8 * a) || cx.levels.some(l => Math.abs(l.p - edge) <= 0.6 * a); if (!conf) return null;
+      const sl = side === -1 ? Math.max(q.h, edge) + 3.5 * cx.sc * 0.6 : Math.min(q.l, edge) - 3.5 * cx.sc * 0.6, mid = (cx.hi + cx.lo) / 2;
+      const s = specMk('s5', 5, 'Range-edge fade ' + (side === -1 ? 'short' : 'long'), tf, i, side, q.c, sl, cx, false, 'rejection at the range ' + (side === -1 ? 'top' : 'bottom'), ['Range ' + cx.lo.toFixed(2) + ' to ' + cx.hi.toFixed(2) + ', rejected at the edge with MA or session-level confluence'], { t2: side === -1 ? cx.lo + 0.25 * a : cx.hi - 0.25 * a, invalid: edge - side * 0.5 * a });
+      return s;
+    }
+  };
+  const SPEC_IDS = ['s1', 's2', 's3', 's4', 's5'];
+  function evalSpec(tf, i, cur) {
+    if (tf.m !== P.entryTf || i < 60) return null;
+    const h = hourOf(tf.bars[i].t + 300); if (h < P.sp.hours[0] || h >= P.sp.hours[1]) return null;
+    const on = P.enabled ? SPEC_IDS.filter(x => P.enabled.indexOf(x) >= 0) : SPEC_IDS;
+    let best = null;
+    for (const id of on) {
+      const s = SPEC_FN[id](tf, i, cur); if (!s) continue;
+      if (s.blockers.length) { if (!P.sp.keepBlocked) continue; }
+      specGrade(tf, i, cur, s); if (s.conf < P.sp.grade) continue;
+      if (!best || s.conf > best.conf) best = s; // setup 1 is checked first, so it wins ties
+    }
+    return best;
+  }
+
   /* ---------- backtest (no lookahead) ---------- */
   function simulate(tf, i, sig) {
     const bars = tf.bars, fi = i + 1;
@@ -970,10 +1154,10 @@ const makeEngine = function () {
       R += d; ev.push({ j: j, end: bb.end, k: 'TIME', price: bb.c, dR: d, rem: 0 }); exit = j;
     }
     const costR = P.cost / risk; R -= costR;
-    return { side: side, sigIdx: i, sigEnd: bars[i].end, sigT: bars[i].t, fillIdx: fi, entry: entry, sl: sig.sl, tp: sig.tp, risk: risk, score: sig.score, reasons: sig.reasons, trigger: sig.trigger, strat: sig.strat || (sig.counter ? 'rev' : sig.lt ? 'lt' : 'ema'), conf: sig.conf, counter: !!sig.counter, lt: !!sig.lt, bias: sig.bias, R: R, costR: costR, hit: hit, ev: ev, exitIdx: exit, exitEnd: bars[exit].end, exitT: bars[exit].t, exitPx: ev[ev.length - 1].price, exitK: ev[ev.length - 1].k };
+    return { side: side, sigIdx: i, sigEnd: bars[i].end, sigT: bars[i].t, fillIdx: fi, entry: entry, sl: sig.sl, tp: sig.tp, risk: risk, score: sig.score, reasons: sig.reasons, trigger: sig.trigger, strat: sig.strat || (sig.counter ? 'rev' : sig.lt ? 'lt' : 'ema'), conf: sig.conf, grade: sig.grade, setupNo: sig.setupNo, setupName: sig.setupName, state: sig.state, zone: sig.zone, pattern: sig.pattern, blockers: sig.blockers, invalid: sig.invalid, sizeMul: sig.sizeMul, tpNames: sig.tpNames, counter: !!sig.counter, lt: !!sig.lt, bias: sig.bias, R: R, costR: costR, hit: hit, ev: ev, exitIdx: exit, exitEnd: bars[exit].end, exitT: bars[exit].t, exitPx: ev[ev.length - 1].price, exitK: ev[ev.length - 1].k };
   }
   function backtest(tf) {
-    const out = [], bars = tf.bars; let i = 60;
+    const out = [], bars = tf.bars, lossDay = {}; let i = 60;
     while (i < bars.length - 2) {
       const cur = bars[i].end;
       if (cur < S.warm) { i++; continue; }
@@ -981,7 +1165,8 @@ const makeEngine = function () {
       if (!sig) { i++; continue; }
       const tr = simulate(tf, i, sig);
       if (!tr) { i++; continue; }
-      out.push(tr); i = tr.exitIdx + 1;
+      if (P.spec && P.sp.loseStop) { const dk = Math.floor(tf.bars[i].t / 86400); if (lossDay[dk] >= P.sp.loseStop) { i++; continue; } }
+      out.push(tr); if (P.spec) { const dk = Math.floor(tr.sigT / 86400); lossDay[dk] = tr.R < 0 ? (lossDay[dk] || 0) + 1 : 0; } i = tr.exitIdx + 1;
     }
     return out;
   }
@@ -1041,6 +1226,7 @@ const makeEngine = function () {
 
   return { S: S, P: P, TFS: TFS, LABEL: LABEL, genSim: genSim, parseCSV: parseCSV, normalise: normalise, init: init, lastDone: lastDone, trendScore: trendScore, trendLabel: trendLabel, biasAt: biasAt, evalSignal: evalSignal, trades: trades, closedAt: closedAt, openAt: openAt, statusAt: statusAt, stats: stats, zones: zones, STRATS: STRATS, backtest: backtest, regimeOf: regimeOf, forming: forming, price: price, isTrading: isTrading };
 };
+
 const Engine = makeEngine();
 if (typeof module !== 'undefined') module.exports = Engine;
 
@@ -1051,7 +1237,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const fmt = (x, d) => { const n = d === undefined ? 2 : d; return x.toLocaleString('en-US', { minimumFractionDigits: n, maximumFractionDigits: n }); };
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   const C = { bg: css('--bg'), line: css('--line'), fg: css('--fg'), mute: css('--mute'), gold: css('--gold'), up: css('--up'), dn: css('--dn'), blue: css('--blue'), panel: css('--panel') };
-  const st = { early: {}, off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 15, hover: null, ws: null, retry: null, seen: null, alerts: true, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
+  const st = { early: {}, off: 0, zoom: 0, step: 5, N: 100, res: 5, ct: 'light', sess: true, ema: false, tf: 5, hover: null, ws: null, retry: null, seen: null, alerts: true, dirty: false, lastTick: 0, tickerKey: '', mode: 'demo', pollMs: 120000, watchMs: 0, unwatch: null, mcp: null, daily: null, connecting: false, note: '', err: '', staleAfter: 90000, limit: 0, conv: u => u, tzName: 'UTC', closedPrev: null };
   const pad2 = n => String(n).padStart(2, '0');
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hm = t => { const d = new Date(t * 1000); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
@@ -1853,11 +2039,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
         return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
       }).join('') + '</div>' +
         '<div class="score" style="margin:8px 0 2px"><span class="lbl">Score</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
+        (open.setupNo ? '<div class="note" style="margin:6px 0 0"><b>' + esc(open.setupName || '') + '</b> &middot; ' + esc(open.state || '') + ' &middot; grade <b>' + esc(open.grade || '') + '</b> (' + open.conf + '/5 from 4H, 1H, 15m, level, candle)<br>Entry zone ' + fmt(open.zone.lo) + ' to ' + fmt(open.zone.hi) + ' &middot; ' + esc(open.pattern || '') + '<br>Cancel if a 5m candle closes ' + (open.side === 1 ? 'below ' : 'above ') + fmt(open.invalid) + ' &middot; Size ' + Math.round((open.sizeMul || 1) * 100) + '% of normal<br>Targets: ' + (open.tpNames || []).map(esc).join(' / ') + (open.blockers && open.blockers.length ? '<br>Filters active: ' + open.blockers.map(esc).join(', ') : '') + '</div>' : '') + 
         (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + (function () { const g = riskGuard(); return '<div class="' + (g.stop ? 'warn' : 'note') + '" style="margin:6px 0 0">' + g.text + '</div>'; })() + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + (open.conf != null ? '[' + open.conf + '/5] ' : '') + open.trigger + ' posted ' + hm(pi.t) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';
-      const need = Math.abs(b) < E.P.biasMin ? 'Timeframes do not agree enough yet. Needs a bias of +30 or -30.' : 'Bias is ' + (b > 0 ? 'bullish' : 'bearish') + '. Waiting for a pullback to the 20 EMA or a 20-bar breakout with a score of ' + E.P.thresh + '+.';
+      const need = E.P.spec ? (m !== E.P.entryTf ? 'Entries are only taken on the 5m chart. The other charts are used to grade them. Switch to 5m.' : 'Watching the 5m for one of the five spec setups. The 15m, 1H and 4H charts grade each entry A+, A or B.') : Math.abs(b) < E.P.biasMin ? 'Timeframes do not agree enough yet. Needs a bias of +30 or -30.' : 'Bias is ' + (b > 0 ? 'bullish' : 'bearish') + '. Waiting for a pullback to the 20 EMA or a 20-bar breakout with a score of ' + E.P.thresh + '+.';
       body.innerHTML = '<div class="score"><span class="lbl">Bias</span><div class="bar"><i style="width:' + Math.min(100, Math.abs(b)) + '%;background:' + (b >= 0 ? C.up : C.dn) + '"></i></div><span class="num">' + sgn0(b) + '</span></div><div class="note" style="margin-top:0">' + need + '</div>' +
         (last ? '<div class="note">Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT + m * 60) + ' ' + hm(last.sigT + m * 60) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
     }
@@ -1891,7 +2078,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   /* ---------- backtest modal ---------- */
-  const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal"};
+  const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal", "s1": "1 Range-break retest", "s2": "2 Compression breakdown", "s3": "3 MA rejection", "s4": "4 Failed-breakdown reclaim (half size)", "s5": "5 Range-edge fade (half size)"};
   function SN(id) { if (E.P.enabled && E.P.enabled.indexOf(id) < 0) return SNAME[id] + ' (off)'; const m = E.P.mt && E.P.mt[id]; return SNAME[id] + (m === undefined ? ' (off)' : m > 1 ? ' (on, ' + E.LABEL[m] + '+)' : ' (on)'); }
   function renderBoard() {
     const rows = BOARD.map(b => { if (!b.n) return '<tr><td>' + SN(b.id) + '</td><td colspan="8">no setups found in the data</td></tr>'; const ok = b.pf > 1.3 && b.exp > 0 && b.n >= 100 && b.oosPf > 1.3; return '<tr><td>' + SN(b.id) + '</td><td>' + b.n + '</td><td>' + b.wr + '%</td><td>' + (b.exp > 0 ? '+' : '') + b.exp + 'R</td><td class="' + (b.pf >= 1 ? 'up' : 'dn') + '">' + b.pf + '</td><td>-' + b.dd + 'R</td><td>' + b.ml + '</td><td>' + b.oosPf + '</td><td class="' + (ok ? 'up' : 'dn') + '">' + (ok ? 'Pass' : 'Not yet') + '</td></tr>'; }).join('');

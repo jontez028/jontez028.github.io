@@ -1499,7 +1499,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const e = !isClosed() && st.early[m];
     if (e) {
       const tf = E.S.tfs[m]; if (!tf) return null; const sg = e.sig;
-      return { early: true, side: sg.side, entry: sg.entry, sl: sg.sl, tp: sg.tp, risk: sg.risk, score: sg.score, reasons: sg.reasons, trigger: 'EARLY ' + sg.trigger, counter: sg.counter, lt: sg.lt, sigIdx: E.lastDone(tf, cur) + 1, sigEnd: 0, sigT: e.barT, ev: [], costR: 0, exitEnd: Infinity };
+      return { early: true, side: sg.side, entry: sg.entry, sl: sg.sl, tp: sg.tp, risk: sg.risk, score: sg.score, reasons: sg.reasons, trigger: 'EARLY ' + sg.trigger, counter: sg.counter, lt: sg.lt, sigIdx: E.lastDone(tf, cur) + 1, sigEnd: 0, sigT: e.barT, seenAt: e.at / 1000, ev: [], costR: 0, exitEnd: Infinity };
     }
     return null;
   }
@@ -1575,8 +1575,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
     else if (st.mode === 'binance') { banner.hidden = false; banner.textContent = 'Not on Twelve Data, so prices and signals will differ from your other devices. Press Data and add your key.'; }
     else banner.hidden = true;
     const m = st.tf, cur = S.cursor, items = [], open = getOpen(m, cur), cl = E.closedAt(m, cur).slice(-8).reverse();
-    if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">' + (open.early ? 'EARLY ' : 'OPEN ') + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]));
-    cl.forEach(t => items.push('<b class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> ' + dm(t.sigT) + ' ' + hm(t.sigT) + ' at ' + fmt(t.entry) + ' closed ' + t.exitK + ' <b class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + 'R</b>'));
+    if (open) items.push('<b class="' + (open.side === 1 ? 'up' : 'dn') + '">' + (open.early ? 'EARLY ' : 'OPEN ') + (open.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> entry ' + fmt(open.entry) + ' SL ' + fmt(open.sl) + ' TP1 ' + fmt(open.tp[0]) + ' TP3 ' + fmt(open.tp[2]) + ' (posted ' + hm(open.early ? (open.seenAt || Date.now() / 1000) : open.sigT + m * 60) + ')');
+    cl.forEach(t => items.push('<b class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + ' ' + E.LABEL[m] + '</b> ' + dm(t.sigT + m * 60) + ' ' + hm(t.sigT + m * 60) + ' at ' + fmt(t.entry) + ' closed ' + t.exitK + ' <b class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + 'R</b>'));
     if (isClosed()) items.unshift('<b class="gold">MARKET CLOSED</b> reopens ' + openLabel() + '. Showing the last session, no new signals until then.');
     if (!items.length) items.push('No signals yet on ' + E.LABEL[m] + '. The scanner is watching.');
     const html = items.join('<i>|</i>');
@@ -1762,7 +1762,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (open) { const s = liveStatus(open, cur), buy = open.side === 1;
         h = '<b class="' + (buy ? 'up' : 'dn') + '">' + (open.early ? 'EARLY ' : '') + (buy ? 'BUY' : 'SELL') + ' ' + lab + '</b> entry ' + f(open.entry) + ' &nbsp;SL <span class="dn">' + f(s.stop) + '</span> &nbsp;TP1 <span class="up">' + f(open.tp[0]) + (s.hit[0] ? ' &#10003;' : '') + '</span> &nbsp;TP2 <span class="up">' + f(open.tp[1]) + (s.hit[1] ? ' &#10003;' : '') + '</span> &nbsp;TP3 <span class="up">' + f(open.tp[2]) + (s.hit[2] ? ' &#10003;' : '') + '</span> &nbsp;<span class="mute">score ' + open.score + '</span>'; }
       else { const b = E.biasAt(cur, m).bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
-        h = '<b>No signal on ' + lab + '.</b> <span class="mute">Bias ' + sgn0(b) + (Math.abs(b) < E.P.biasMin ? ', timeframes disagree' : ', waiting for a pullback or breakout') + (last ? '. Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + f(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) : '') + '</span>'; }
+        h = '<b>No signal on ' + lab + '.</b> <span class="mute">Bias ' + sgn0(b) + (Math.abs(b) < E.P.biasMin ? ', timeframes disagree' : ', waiting for a pullback or breakout') + (last ? '. Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + f(last.entry) + ' at ' + dm(last.sigT + m * 60) + ' ' + hm(last.sigT + m * 60) : '') + '</span>'; }
     }
     if (d.innerHTML !== h) d.innerHTML = h;
   }
@@ -1798,9 +1798,27 @@ if (typeof module !== 'undefined') module.exports = Engine;
     const bits = [];
     E.S.list.filter(m => m <= 240).forEach(m => {
       const o = getOpen(m, E.S.cursor); if (!o || o.test) return;
-      bits.push('<span class="' + (o.side === 1 ? 'up' : 'dn') + '" style="white-space:nowrap">' + E.LABEL[m] + ' ' + (o.side === 1 ? 'Buy' : 'Sell') + (o.early ? ' (early)' : '') + '</span>');
+      bits.push('<span class="' + (o.side === 1 ? 'up' : 'dn') + '" style="white-space:nowrap">' + E.LABEL[m] + ' ' + (o.side === 1 ? 'Buy' : 'Sell') + (o.early ? ' (early)' : '') + ' ' + hm(o.early ? (o.seenAt || Date.now() / 1000) : o.sigT + m * 60) + '</span>');
     });
     return '<div class="note" style="margin-top:6px"><b class="lbl" style="margin-right:6px">All timeframes</b>' + (bits.length ? bits.join(' &middot; ') : 'no signal right now, still scanning') + '</div>';
+  }
+  /* When a signal was posted, how old it is, and whether it is still worth entering. Posted = the moment its candle closed (an early signal: when it first showed). */
+  function postedInfo(open, m, s) {
+    const nowT = E.S.live ? Date.now() / 1000 : E.S.base[E.S.cursor].t + E.S.baseMin * 60;
+    const t = open.early ? (open.seenAt || nowT) : open.sigT + m * 60;
+    const mins = Math.max(0, Math.round((nowT - t) / 60));
+    const ago = mins < 1 ? 'just now' : mins < 60 ? mins + ' min ago' : Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm ago';
+    const chase = (s.px - open.entry) * open.side;   // positive: price already ran past the entry in the trade's direction
+    let verdict, cls = 'note';
+    if (open.test) { verdict = 'Test signal.'; }
+    else if (open.early) { verdict = 'Not confirmed. Wait for the candle to close before entering.'; cls = 'warn'; }
+    else if (s.stopped) { verdict = 'Stopped out. Do not enter.'; cls = 'warn'; }
+    else if (s.hit[0]) { verdict = 'TP1 already hit. Too late to enter, wait for the next signal.'; cls = 'warn'; }
+    else if (chase > 0.35 * open.risk) { verdict = 'Late: price is ' + chase.toFixed(2) + ' past the entry (' + Math.round(chase / open.risk * 100) + '% of the stop). Wait for a pullback to ' + fmt(open.entry) + ' or the next signal.'; cls = 'warn'; }
+    else if (mins > 2 * m) { verdict = 'Old signal, posted over ' + 2 * m + ' min ago. Only enter if price is still at ' + fmt(open.entry) + '.'; cls = 'warn'; }
+    else if (chase >= 0) { verdict = 'Fresh. Price is at the entry, you can enter now.'; }
+    else { verdict = 'Fresh. Price is ' + (-chase).toFixed(2) + ' ' + (open.side === 1 ? 'below' : 'above') + ' the entry, so a limit order at ' + fmt(open.entry) + ' fills when it comes back.'; }
+    return { t: t, mins: mins, ago: ago, verdict: verdict, cls: cls, html: '<div class="' + cls + '" style="margin:0 0 8px"><b class="num">Posted ' + hm(t) + ' ' + TZ + '</b> &middot; ' + ago + '<br>' + verdict + '</div>' };
   }
   function renderSignal() { renderSignalCore(); $('#sigBody').insertAdjacentHTML('beforeend', radar()); }
   function renderSignalCore() {
@@ -1812,25 +1830,26 @@ if (typeof module !== 'undefined') module.exports = Engine;
       pill.textContent = 'Closed'; pill.className = 'pill wait';
       body.innerHTML = '<div class="note" style="margin-top:0">Gold is closed for the weekend. It reopens ' + openLabel() + '. Scanning resumes then, and no entries are given until the market is trading.</div>' +
         '<div class="score" style="margin-top:8px"><span class="lbl">Bias</span><div class="bar"><i style="width:' + Math.min(100, Math.abs(b)) + '%;background:' + (b >= 0 ? C.up : C.dn) + '"></i></div><span class="num">' + sgn0(b) + '</span></div>' +
-        (last ? '<div class="note">Last signal: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
+        (last ? '<div class="note">Last signal: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT + m * 60) + ' ' + hm(last.sigT + m * 60) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
     } else if (open) {
       const s = liveStatus(open, cur), buy = open.side === 1;
       pill.textContent = (open.early ? 'Early ' : '') + (buy ? 'Buy' : 'Sell'); pill.className = 'pill ' + (buy ? 'buy' : 'sell');
       sigCard.classList.add('hot'); sigCard.classList.toggle('sellc', !buy);
       const rows = [['Entry', open.entry, null], ['SL', s.stop, null], ['TP1', open.tp[0], 0], ['TP2', open.tp[1], 1], ['TP3', open.tp[2], 2]];
-      body.innerHTML = '<div class="tk">' + rows.map(r => {
+      const pi = postedInfo(open, m, s);
+      body.innerHTML = pi.html + '<div class="tk">' + rows.map(r => {
         const isSl = r[0] === 'SL', isEn = r[0] === 'Entry', done = (r[2] !== null && s.hit[r[2]]) || (isSl && s.stopped);
         const d = isEn ? 'now ' + fmt(s.px) : sgn((r[1] - open.entry) * open.side) + (isSl ? (s.stop === open.sl ? ' -1R' : s.stop === open.entry ? ' BE' : ' +1R') : ' +' + (r[2] + 1) + 'R');
         return '<div class="tkrow ' + (isSl ? 'sl' : isEn ? 'en' : 'tp' + (done ? ' done' : '')) + '"><span class="n">' + r[0] + (done ? ' &#10003;' : '') + '</span><span class="p">' + fmt(r[1]) + '</span><span class="d">' + (done ? 'HIT' : d) + '</span></div>';
       }).join('') + '</div>' +
         '<div class="score" style="margin:8px 0 2px"><span class="lbl">Score</span><div class="bar"><i style="width:' + open.score + '%"></i></div><span class="num">' + open.score + '</span></div>' +
-        (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + (function () { const g = riskGuard(); return '<div class="' + (g.stop ? 'warn' : 'note') + '" style="margin:6px 0 0">' + g.text + '</div>'; })() + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + (open.conf != null ? '[' + open.conf + '/5] ' : '') + open.trigger + ' at ' + hm(open.sigT) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
+        (open.early ? '<div class="warn" style="margin:6px 0 0">EARLY SIGNAL. The candle is still forming, so this can vanish before it closes. A second alert comes if it is confirmed at the close.</div>' : '') + (open.counter ? '<div class="warn" style="margin:6px 0 0">COUNTER-TREND (*). Goes against the bigger trend, so use a smaller size and respect the stop.</div>' : open.lt ? '<div class="warn" style="margin:6px 0 0">SHORT-TERM (*). Follows the lower timeframes while the bigger ones disagree. Smaller size.</div>' : '') + (open.test ? '<div class="warn" style="margin:6px 0 0">TEST SIGNAL. Made up at the current price. Press Test signal again to clear.</div>' : '') + (function () { const g = riskGuard(); return '<div class="' + (g.stop ? 'warn' : 'note') + '" style="margin:6px 0 0">' + g.text + '</div>'; })() + '<div class="note" style="margin-top:4px" title="' + open.reasons.join('. ') + '">' + (open.conf != null ? '[' + open.conf + '/5] ' : '') + open.trigger + ' posted ' + hm(pi.t) + ' ' + TZ + '. Open <b class="num ' + (s.live >= 0 ? 'up' : 'dn') + '">' + (s.live >= 0 ? '+' : '') + s.live.toFixed(2) + 'R</b>, ' + Math.round(s.rem * 100) + '% running, risk $' + open.risk.toFixed(2) + '.</div>';
     } else {
       const bi = E.biasAt(cur, m), b = bi.bias, cl = E.closedAt(m, cur), last = cl[cl.length - 1];
       pill.textContent = 'Wait'; pill.className = 'pill wait';
       const need = Math.abs(b) < E.P.biasMin ? 'Timeframes do not agree enough yet. Needs a bias of +30 or -30.' : 'Bias is ' + (b > 0 ? 'bullish' : 'bearish') + '. Waiting for a pullback to the 20 EMA or a 20-bar breakout with a score of ' + E.P.thresh + '+.';
       body.innerHTML = '<div class="score"><span class="lbl">Bias</span><div class="bar"><i style="width:' + Math.min(100, Math.abs(b)) + '%;background:' + (b >= 0 ? C.up : C.dn) + '"></i></div><span class="num">' + sgn0(b) + '</span></div><div class="note" style="margin-top:0">' + need + '</div>' +
-        (last ? '<div class="note">Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT) + ' ' + hm(last.sigT) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
+        (last ? '<div class="note">Last: ' + (last.side === 1 ? 'buy' : 'sell') + ' ' + fmt(last.entry) + ' at ' + dm(last.sigT + m * 60) + ' ' + hm(last.sigT + m * 60) + ', <b class="num ' + (last.R > 0 ? 'up' : 'dn') + '">' + sgn(last.R) + 'R</b> (' + last.exitK + ').</div>' : '');
     }
   }
 
@@ -1883,7 +1902,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (!s) { $('#stats').innerHTML = '<div class="st"><span class="lbl">Trades</span><div class="v">0</div></div>'; $('#trades').innerHTML = ''; $('#split').innerHTML = ''; drawEq([]); return; }
     const tiles = [['Trades', s.n, ''], ['Win rate', (s.wr * 100).toFixed(0) + '%', s.wr >= .5 ? 'up' : 'dn'], ['Profit factor', isFinite(s.pf) ? s.pf.toFixed(2) : 'n/a', s.pf >= 1 ? 'up' : 'dn'], ['Expectancy', sgn(s.exp) + 'R', s.exp >= 0 ? 'up' : 'dn'], ['Total', sgn(s.tot) + 'R', s.tot >= 0 ? 'up' : 'dn'], ['Max drawdown', '-' + s.dd.toFixed(1) + 'R', 'dn'], ['TP1 / TP2 / TP3', s.hit.map(x => (x * 100).toFixed(0)).join(' / ') + '%', '']];
     $('#stats').innerHTML = tiles.map(t => '<div class="st"><span class="lbl">' + t[0] + '</span><div class="v ' + t[2] + '">' + t[1] + '</div></div>').join('');
-    $('#trades').innerHTML = '<tr><th>Time</th><th>Setup</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>R</th></tr>' + cl.slice(-8).reverse().map(t => '<tr><td>' + dm(t.sigT) + ' ' + hm(t.sigT) + '</td><td>' + (SNAME[t.strat] || t.strat) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.exitPx) + '</td><td>' + t.exitK + '</td><td class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + '</td></tr>').join('');
+    $('#trades').innerHTML = '<tr><th>Time</th><th>Setup</th><th>Side</th><th>Entry</th><th>Exit</th><th>Result</th><th>R</th></tr>' + cl.slice(-8).reverse().map(t => '<tr><td>' + dm(t.sigT + m * 60) + ' ' + hm(t.sigT + m * 60) + '</td><td>' + (SNAME[t.strat] || t.strat) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'BUY' : 'SELL') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.exitPx) + '</td><td>' + t.exitK + '</td><td class="' + (t.R > 0 ? 'up' : 'dn') + '">' + sgn(t.R) + '</td></tr>').join('');
     const cut = E.S.warm + (cur - E.S.warm) * 0.7, a = E.stats(cl.filter(t => t.sigEnd < cut)), b = E.stats(cl.filter(t => t.sigEnd >= cut));
     const rowOf = (n, x) => '<tr><td>' + n + '</td>' + (x ? '<td>' + x.n + '</td><td>' + (x.wr * 100).toFixed(0) + '%</td><td>' + (isFinite(x.pf) ? x.pf.toFixed(2) : 'n/a') + '</td><td>' + sgn(x.exp) + 'R</td><td>' + sgn(x.tot) + 'R</td>' : '<td colspan="5">no trades</td>') + '</tr>';
     $('#split').innerHTML = '<tr><th>Split</th><th>Trades</th><th>Win rate</th><th>Profit factor</th><th>Expectancy</th><th>Total</th></tr>' + rowOf('First 70% of history', a) + rowOf('Last 30% of history', b);
@@ -2137,8 +2156,8 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
   function hRender() {
     const m = +$('#hTf').value, rows = E.closedAt(m, E.S.cursor).slice(-80).reverse(), open = E.openAt(m, E.S.cursor);
-    const row = (t, isOpen) => '<tr><td>' + esc(stampL(t.sigT)) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'Buy' : 'Sell') + '</td><td>' + esc(SNAME[t.strat] || t.strat || '') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.sl) + '</td><td>' + t.tp.map(x => fmt(x, 0)).join(' / ') + '</td><td>' + (isOpen ? 'open' : esc(t.exitK)) + '</td><td class="' + (isOpen ? '' : t.R >= 0 ? 'up' : 'dn') + '">' + (isOpen ? '' : sgn(t.R)) + '</td></tr>';
-    $('#hTable').innerHTML = '<tr><th>Signal time</th><th>Side</th><th>Strategy</th><th>Entry</th><th>Stop</th><th>TP1 / TP2 / TP3</th><th>Exit</th><th>R</th></tr>' + (open ? row(open, true) : '') + (rows.length ? rows.map(t => row(t, false)).join('') : '<tr><td colspan="8" class="mute">No closed signals on this timeframe in the loaded data.</td></tr>');
+    const row = (t, isOpen) => '<tr><td>' + esc(stampL(t.sigT + m * 60)) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'Buy' : 'Sell') + '</td><td>' + esc(SNAME[t.strat] || t.strat || '') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.sl) + '</td><td>' + t.tp.map(x => fmt(x, 0)).join(' / ') + '</td><td>' + (isOpen ? 'open' : esc(t.exitK)) + '</td><td class="' + (isOpen ? '' : t.R >= 0 ? 'up' : 'dn') + '">' + (isOpen ? '' : sgn(t.R)) + '</td></tr>';
+    $('#hTable').innerHTML = '<tr><th>Posted (candle close)</th><th>Side</th><th>Strategy</th><th>Entry</th><th>Stop</th><th>TP1 / TP2 / TP3</th><th>Exit</th><th>R</th></tr>' + (open ? row(open, true) : '') + (rows.length ? rows.map(t => row(t, false)).join('') : '<tr><td colspan="8" class="mute">No closed signals on this timeframe in the loaded data.</td></tr>');
   }
   function openAcct() {
     $('#mAcct').hidden = false; $('#acctWho').textContent = AUTH.me ? AUTH.me.email : '';

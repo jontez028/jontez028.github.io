@@ -635,7 +635,7 @@ const makeEngine = function () {
   // Only the strategies that made money in the signal history (3 Nov to 24 Nov, 79 signals): liquidity sweep +6.3R, Bollinger fade +5.6R, Fibonacci +5.2R.
   // Dropped: EMA pullback (-4.7R, 42% wins), short-term trend (-3.5R, 25% wins), RSI(2) pullback (-0.6R), breakout and opening range (scratches only).
   // To bring one back, add its id here, or set this to null to allow all 14.
-  P.enabled = ['s1', 's2', 's3', 's4', 's5'];
+  P.enabled = ['s1', 's2', 's3', 's4', 's5', 's6'];
   // Optional per-strategy minimum timeframe in minutes (strategy missing from the map is off). null = no gate.
   // Left off: after fixing a timestamp error in my tests, no strategy shows a proven edge on 15m or 1H.
   P.mt = null;
@@ -744,7 +744,8 @@ const makeEngine = function () {
     { id: 's2', n: 'Compression breakdown', g: 'S', maxBars: 36 },
     { id: 's3', n: 'MA rejection', g: 'S', maxBars: 36 },
     { id: 's4', n: 'Failed-breakdown reclaim', g: 'S', maxBars: 36 },
-    { id: 's5', n: 'Range-edge fade', g: 'S', maxBars: 36 }
+    { id: 's5', n: 'Range-edge fade', g: 'S', maxBars: 36 },
+    { id: 's6', n: 'SMC order-block retest', g: 'S', maxBars: 36 }
   ];
   const SID = {}; STRATS.forEach(s => { SID[s.id] = s; });
   const hourOf = t => { const d = new Date(t * 1000); return d.getUTCHours() + d.getUTCMinutes() / 60; };
@@ -1105,7 +1106,56 @@ const makeEngine = function () {
       return s;
     }
   };
-  const SPEC_IDS = ['s1', 's2', 's3', 's4', 's5'];
+
+  /* ---------- Setup 6: Smart Money Concepts (structure break, order block retest) ----------
+     Written from the public SMC ideas (pivot structure, BOS / CHoCH on a close, order block = the extreme candle of the leg that broke structure,
+     premium / discount of the recent range). It is NOT a copy of the LuxAlgo script, which is licensed CC BY-NC-SA 4.0 (non-commercial only).
+     Built once per timeframe from closed candles only, so it never looks ahead. */
+  function smcBuild(tf) {
+    if (tf._smc) return tf._smc;
+    const b = tf.bars, n = b.length, L = 5, obs = [], trendAt = new Array(n).fill(0), lastEv = new Array(n).fill(null);
+    let trend = 0, pH = { p: NaN, bar: -1, x: true }, pL = { p: NaN, bar: -1, x: true }, ev = null;
+    for (let i = 0; i < n; i++) {
+      const j = i - L;
+      if (j >= L) { if (pivH(b, j, L, L)) pH = { p: b[j].h, bar: j, x: false }; if (pivL(b, j, L, L)) pL = { p: b[j].l, bar: j, x: false }; }
+      if (i > 0) {
+        if (!pH.x && b[i].c > pH.p && b[i - 1].c <= pH.p) { // bullish break of structure
+          const kind = trend === -1 ? 'choch' : 'bos'; trend = 1; pH.x = true; ev = { i: i, dir: 1, kind: kind, level: pH.p };
+          let k = pH.bar; for (let m = pH.bar; m < i; m++) if (b[m].l < b[k].l) k = m;
+          obs.push({ born: i, bar: k, hi: b[k].h, lo: b[k].l, dir: 1, kind: kind, mit: Infinity });
+        } else if (!pL.x && b[i].c < pL.p && b[i - 1].c >= pL.p) {
+          const kind = trend === 1 ? 'choch' : 'bos'; trend = -1; pL.x = true; ev = { i: i, dir: -1, kind: kind, level: pL.p };
+          let k = pL.bar; for (let m = pL.bar; m < i; m++) if (b[m].h > b[k].h) k = m;
+          obs.push({ born: i, bar: k, hi: b[k].h, lo: b[k].l, dir: -1, kind: kind, mit: Infinity });
+        }
+      }
+      trendAt[i] = trend; lastEv[i] = ev;
+    }
+    for (const o of obs) for (let k = o.born + 1; k < n; k++) if (o.dir === 1 ? b[k].c < o.lo : b[k].c > o.hi) { o.mit = k; break; } // closed through it: mitigated
+    return (tf._smc = { obs: obs, trendAt: trendAt, lastEv: lastEv });
+  }
+  SPEC_FN.s6 = function (tf, i, cur) {
+    const S6 = smcBuild(tf), cx = specCtx(tf, i), b = tf.bars, q = b[i], p = b[i - 1], a = cx.a, side = S6.trendAt[i];
+    if (!side) return null;
+    const ev = S6.lastEv[i]; if (!ev || i - ev.i > 80) return null; // the structure break must be recent
+    let rh = -Infinity, rl = Infinity; for (let k = Math.max(0, i - 100); k < i; k++) { if (b[k].h > rh) rh = b[k].h; if (b[k].l < rl) rl = b[k].l; }
+    const eq = (rh + rl) / 2; if (side === 1 ? q.c > eq : q.c < eq) return null; // longs from discount, shorts from premium
+    for (let m = S6.obs.length - 1; m >= 0; m--) {
+      const o = S6.obs[m]; if (o.dir !== side || o.born >= i || i - o.born > 80 || o.mit <= i) continue;
+      if (o.hi - o.lo < 0.3 * a || o.hi - o.lo > 3 * a) continue;
+      const tag = side === 1 ? q.l <= o.hi && q.c > o.lo : q.h >= o.lo && q.c < o.hi; if (!tag) continue;
+      let fresh = true; for (let k = o.born + 1; k < i; k++) if (side === 1 ? b[k].l <= o.hi : b[k].h >= o.lo) { fresh = false; break; } if (!fresh) continue; // first touch only
+      if (side === 1 ? !(q.c > q.o && (wickDn(q) >= 0.3 || bullEng(q, p))) : !(q.c < q.o && (wickUp(q) >= 0.3 || bearEng(q, p)))) continue;
+      const sl = side === 1 ? o.lo - 0.5 * cx.sc : o.hi + 0.5 * cx.sc;
+      const s = specMk('s6', 6, 'SMC order-block retest ' + (side === 1 ? 'long' : 'short'), tf, i, side, q.c, sl, cx, cx.state !== 'balance', 'first retest of the ' + (side === 1 ? 'bullish' : 'bearish') + ' order block, ' + (side === 1 ? 'bullish' : 'bearish') + ' candle',
+        [(ev.kind === 'choch' ? 'Change of character' : 'Break of structure') + ' ' + (side === 1 ? 'up' : 'down') + ' through ' + ev.level.toFixed(2), 'Price retests the order block ' + o.lo.toFixed(2) + ' to ' + o.hi.toFixed(2) + ' from ' + (side === 1 ? 'discount' : 'premium')], { invalid: side === 1 ? o.lo - 0.2 * a : o.hi + 0.2 * a });
+      if (!s) continue;
+      s.sizeMul = (ev.kind === 'choch' ? 0.5 : 1) * (s.sizeMul < 1 && SESS(new Date(q.t * 1000).getUTCHours()) === 'New York' ? 0.5 : 1);
+      return s;
+    }
+    return null;
+  };
+  const SPEC_IDS = ['s1', 's2', 's3', 's4', 's5', 's6'];
   function evalSpec(tf, i, cur) {
     if (tf.m !== P.entryTf || i < 60) return null;
     const h = hourOf(tf.bars[i].t + 300); if (h < P.sp.hours[0] || h >= P.sp.hours[1]) return null;
@@ -2078,7 +2128,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   /* ---------- backtest modal ---------- */
-  const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal", "s1": "1 Range-break retest", "s2": "2 Compression breakdown", "s3": "3 MA rejection", "s4": "4 Failed-breakdown reclaim (half size)", "s5": "5 Range-edge fade (half size)"};
+  const BOARD = [{"id": "rsi2", "n": 1226, "wr": 60, "exp": -0.05, "pf": 0.83, "tot": -57.8, "dd": 63.2, "ml": 12, "pm": 124.8, "oosPf": 0.78, "oosExp": -0.07}, {"id": "bb", "n": 195, "wr": 38, "exp": -0.11, "pf": 0.81, "tot": -22.2, "dd": 31.1, "ml": 14, "pm": 19.7, "oosPf": 0.93, "oosExp": -0.04}, {"id": "vwap", "n": 46, "wr": 37, "exp": -0.36, "pf": 0.44, "tot": -16.4, "dd": 16.4, "ml": 6, "pm": 6.8, "oosPf": 0.54, "oosExp": -0.24}, {"id": "range", "n": 0}, {"id": "sweep", "n": 929, "wr": 52, "exp": 0.01, "pf": 1.02, "tot": 9.6, "dd": 39.3, "ml": 10, "pm": 94.2, "oosPf": 1.03, "oosExp": 0.01}, {"id": "ob", "n": 34, "wr": 53, "exp": 0.1, "pf": 1.21, "tot": 3.3, "dd": 4.5, "ml": 3, "pm": 3.6, "oosPf": 0.82, "oosExp": -0.09}, {"id": "ema", "n": 1186, "wr": 48, "exp": -0.01, "pf": 0.99, "tot": -6.5, "dd": 80, "ml": 15, "pm": 119.5, "oosPf": 0.83, "oosExp": -0.09}, {"id": "brk", "n": 176, "wr": 72, "exp": -0.04, "pf": 0.84, "tot": -7, "dd": 12.6, "ml": 4, "pm": 17.7, "oosPf": 0.71, "oosExp": -0.08}, {"id": "fib", "n": 142, "wr": 50, "exp": -0.08, "pf": 0.83, "tot": -11.3, "dd": 19.4, "ml": 8, "pm": 20.8, "oosPf": 0.86, "oosExp": -0.06}, {"id": "div", "n": 136, "wr": 47, "exp": -0.05, "pf": 0.89, "tot": -7.4, "dd": 15.3, "ml": 8, "pm": 13.9, "oosPf": 0.73, "oosExp": -0.15}, {"id": "news", "n": 20, "wr": 35, "exp": -0.3, "pf": 0.57, "tot": -6, "dd": 9.6, "ml": 8, "pm": 3.1, "oosPf": 0.02, "oosExp": -0.96}, {"id": "orb", "n": 88, "wr": 74, "exp": 0.01, "pf": 1.03, "tot": 0.7, "dd": 6.7, "ml": 3, "pm": 12.7, "oosPf": 0.94, "oosExp": -0.01}, {"id": "lt", "n": 117, "wr": 47, "exp": -0.11, "pf": 0.78, "tot": -13, "dd": 21.2, "ml": 8, "pm": 13, "oosPf": 0.52, "oosExp": -0.29}, {"id": "rev", "n": 432, "wr": 49, "exp": -0.02, "pf": 0.95, "tot": -10, "dd": 36.9, "ml": 13, "pm": 43.9, "oosPf": 0.93, "oosExp": -0.04}], SNAME = {"rsi2": "RSI(2) pullback", "bb": "Bollinger range fade", "vwap": "VWAP deviation (day average)", "range": "Range support/resistance fade", "sweep": "Liquidity sweep reversal", "ob": "Order block + break of structure", "ema": "EMA pullback, 4H filter", "brk": "Breakout and retest", "fib": "Fibonacci 50-61.8%", "div": "RSI divergence at key level", "news": "Spike fade (post-news style)", "orb": "Opening range breakout", "lt": "Short-term trend", "rev": "Counter-trend reversal", "s1": "1 Range-break retest", "s2": "2 Compression breakdown", "s3": "3 MA rejection", "s4": "4 Failed-breakdown reclaim (half size)", "s5": "5 Range-edge fade (half size)", "s6": "6 SMC order-block retest"};
   function SN(id) { if (E.P.enabled && E.P.enabled.indexOf(id) < 0) return SNAME[id] + ' (off)'; const m = E.P.mt && E.P.mt[id]; return SNAME[id] + (m === undefined ? ' (off)' : m > 1 ? ' (on, ' + E.LABEL[m] + '+)' : ' (on)'); }
   function renderBoard() {
     const rows = BOARD.map(b => { if (!b.n) return '<tr><td>' + SN(b.id) + '</td><td colspan="8">no setups found in the data</td></tr>'; const ok = b.pf > 1.3 && b.exp > 0 && b.n >= 100 && b.oosPf > 1.3; return '<tr><td>' + SN(b.id) + '</td><td>' + b.n + '</td><td>' + b.wr + '%</td><td>' + (b.exp > 0 ? '+' : '') + b.exp + 'R</td><td class="' + (b.pf >= 1 ? 'up' : 'dn') + '">' + b.pf + '</td><td>-' + b.dd + 'R</td><td>' + b.ml + '</td><td>' + b.oosPf + '</td><td class="' + (ok ? 'up' : 'dn') + '">' + (ok ? 'Pass' : 'Not yet') + '</td></tr>'; }).join('');

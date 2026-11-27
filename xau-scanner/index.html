@@ -201,6 +201,14 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
   .chartwrap { flex: none; height: 380px; }
   .trendbox { display: none; }
   .bottom { flex-wrap: wrap; } .bt2 { grid-template-columns: minmax(0, 1fr); }
+  /* phone: nothing may be wider than the screen, otherwise the browser zooms the whole page out */
+  html, body { max-width: 100vw; overflow-x: hidden; } body { padding-left: max(8px, env(safe-area-inset-left, 0px)); padding-right: max(8px, env(safe-area-inset-right, 0px)); font-size: 14px; }
+  .app, .main, .main > *, .top > *, .bottom > * { min-width: 0; max-width: 100%; }
+  .acts { flex: 1 1 100%; width: 100%; } .acts .btn, .acts .chip { flex: 1 1 auto; padding: 9px 10px; font-size: 13px; text-align: center; }
+  .stat { flex: 1 1 30%; } .bottom { gap: 10px; }
+  .chartwrap { height: min(62vh, 520px); min-height: 340px; }
+  .top { gap: 8px; } .pxbox #px { font-size: 28px; }
+  .tools { flex-wrap: wrap; gap: 6px; } .tools #viewSeg { margin-left: 0 !important; } .tools #srcName, .tools #feedAge { flex: 1 1 100% !important; white-space: normal; }
 }
 
 /* accounts: sign-in gate, journal, admin */
@@ -226,6 +234,8 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
 .jf { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-bottom: 8px; }
 .jf label > span { display: block; margin-bottom: 4px; font: 600 9.5px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
 .tiny { padding: 3px 8px; font-size: 11px; }
+/* clients (signed in, not admin) do not get the backtest or the test signal; the admin keeps everything */
+body.client #testSig, body.client #btOpen2, body.client #snapCard { display: none !important; }
 @media (max-width: 960px) { .acts { flex-wrap: wrap; } }
 </style>
 
@@ -272,7 +282,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
         <div class="hd"><span class="lbl">Institutional zones</span><span class="lbl">1H structure</span></div>
         <div class="bd" id="zoneBody"></div>
       </section>
-      <section class="card">
+      <section class="card" id="snapCard">
         <div class="hd"><span class="lbl" id="snapTitle">Backtest</span><button class="btn gold" id="btOpen" type="button" style="padding:4px 10px">Details</button></div>
         <div class="bd"><div class="snap" id="snap"></div></div>
       </section>
@@ -2243,6 +2253,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   const SB_URL = 'https://efqdsesxxrxretvadcoq.supabase.co', SB_KEY = 'sb_publishable_vv31qwydS3GZ2FGGJyUGMA_3de6Jb6E';
   const PAY_INFO = ''; // Fill in how people pay you, for example: Send the amount by M-Pesa to 07xx xxx xxx, then press the button below.
   const AUTH = { on: !(window.claude && window.claude.use), sess: null, me: null, ok: false, started: false, mode: 'in' };
+  if (AUTH.on) document.body.classList.add('client'); // until the account is known, show the client view; the admin gets the full view once signed in
   const SKEY = 'xau.sb';
   const dshort = v => v ? new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
   function sbSet(j) {
@@ -2340,7 +2351,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function leftText(ms) { const h = Math.floor(ms / 3600000); return h >= 48 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h >= 1 ? h + 'h ' + Math.floor(ms % 3600000 / 60000) + 'm' : Math.max(1, Math.floor(ms / 60000)) + 'm'; }
   function planChip() {
     const c = $('#planChip'), m = AUTH.me; if (!AUTH.on || !m) { c.hidden = true; return; }
-    c.hidden = false; $('#acctOpen').hidden = false; $('#signOut').hidden = false; if (window.paRefresh) { $('#phoneAlerts').hidden = false; window.paRefresh(); } $('#adminOpen').hidden = m.role !== 'admin';
+    document.body.classList.toggle('client', m.role !== 'admin'); c.hidden = false; $('#acctOpen').hidden = false; $('#signOut').hidden = false; if (window.paRefresh) { $('#phoneAlerts').hidden = false; window.paRefresh(); } $('#adminOpen').hidden = m.role !== 'admin';
     if (m.role === 'admin') { c.textContent = 'Admin'; c.className = 'chip ok'; }
     else if (m.status === 'trial') { const ms = Date.parse(m.trial_ends_at) - Date.now(); c.textContent = 'Trial ' + leftText(ms) + ' left'; c.className = 'chip ' + (ms < 6 * 3600000 ? 'bad' : 'warn'); }
     else if (m.status === 'active') { c.textContent = m.paid_until ? 'Active until ' + dshort(m.paid_until) : 'Active'; c.className = 'chip ok'; }
@@ -2476,7 +2487,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   $('#gtIn').onclick = () => setMode('in'); $('#gtUp').onclick = () => setMode('up'); $('#gForm').onsubmit = submitAuth;
-  const doOut = async () => { try { if (AUTH.sess) await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {} stopWatch(); closeWs(); sbClear(); AUTH.started = false; $('#mAcct').hidden = true; $('#mAdmin').hidden = true; $('#planChip').hidden = true; $('#acctOpen').hidden = true; $('#adminOpen').hidden = true; $('#signOut').hidden = true; $('#phoneAlerts').hidden = true; if (window.paClose) window.paClose(); setMode('in'); gate.show('forms'); };
+  const doOut = async () => { try { if (AUTH.sess) await sbFetch('/auth/v1/logout', { method: 'POST' }); } catch (e) {} stopWatch(); closeWs(); sbClear(); AUTH.started = false; $('#mAcct').hidden = true; $('#mAdmin').hidden = true; $('#planChip').hidden = true; $('#acctOpen').hidden = true; $('#adminOpen').hidden = true; $('#signOut').hidden = true; $('#phoneAlerts').hidden = true; if (AUTH.on) document.body.classList.add('client'); if (window.paClose) window.paClose(); setMode('in'); gate.show('forms'); };
   $('#signOut').onclick = doOut; $('#gOut').onclick = doOut;
   $('#gRecheck').onclick = async () => { $('#gLockStat').textContent = 'Checking...'; try { await loadMe(); if (AUTH.ok) route(); else { $('#gLockStat').textContent = 'Not active yet. The admin switches you on after checking the payment.'; planChip(); } } catch (e) { $('#gLockStat').textContent = e.message; } };
   $('#acctOpen').onclick = openAcct; $('#tabJ').onclick = () => tabs('J'); $('#tabH').onclick = () => tabs('H'); $('#hTf').onchange = hRender;

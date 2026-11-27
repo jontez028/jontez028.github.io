@@ -1544,6 +1544,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
   function stopOverlay() {
     if (bin.retry) { clearTimeout(bin.retry); bin.retry = null; }
     if (bin.timer) { clearInterval(bin.timer); bin.timer = null; }
+    if (bin.poll) { clearInterval(bin.poll); bin.poll = null; }
     if (bin.ws) { bin.ws.onclose = null; try { bin.ws.close(); } catch (e) {} bin.ws = null; }
     st.tickOn = false; st.liveT = 0; bin.basis = null; bin.closes.clear(); bin.tb = null;
   }
@@ -1566,12 +1567,22 @@ if (typeof module !== 'undefined') module.exports = Engine;
         let px = null;
         if (src.k === 'kraken') { if (m.channel === 'ticker' && m.data && m.data[0]) px = +m.data[0].last; }
         else if (Array.isArray(m) && Array.isArray(m[1]) && m[1].length >= 7) px = +m[1][6];
-        const r = fromPrice(px); if (!r) return;
-        if (r.close) { bin.closes.set(r.t, r.c); const mk = { t: r.t * 1000, c: r.c, o: r.o, h: r.h, l: r.l, x: true }; handleTick(mk); }
-        k = { t: bin.tb.t * 1000, o: bin.tb.o, h: bin.tb.h, l: bin.tb.l, c: bin.tb.c, x: false };
+        pushPx(px); return;
       }
       if (!k) return; handleTick(k);
     };
+    function pushPx(px) {
+      const r = fromPrice(px); if (!r) return;
+      if (r.close) { bin.closes.set(r.t, r.c); handleTick({ t: r.t * 1000, c: r.c, o: r.o, h: r.h, l: r.l, x: true }); }
+      handleTick({ t: bin.tb.t * 1000, o: bin.tb.o, h: bin.tb.h, l: bin.tb.l, c: bin.tb.c, x: false });
+    }
+    // If no tick has arrived for 8 seconds (stream blocked, or the phone paused it), ask for the price over plain HTTPS every 3 seconds.
+    const POLLS = [{ n: 'Kraken PAXG', u: 'https://api.kraken.com/0/public/Ticker?pair=PAXGUSD', g: j => +Object.values(j.result)[0].c[0] }, { n: 'Binance PAXG', u: 'https://api.binance.com/api/v3/ticker/price?symbol=PAXGUSDT', g: j => +j.price }];
+    bin.poll = setInterval(async () => {
+      if (bin.ws !== ws || Date.now() - (bin.lastPx || 0) < 8000 || document.hidden && false) return;
+      for (const q of POLLS) { try { const r = await fetch(q.u, { cache: 'no-store' }), px = q.g(await r.json()); if (px > 0) { st.tickSrc = q.n + ' (every 3s)'; pushPx(px); return; } } catch (e) {} }
+    }, 3000);
+    if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250);
     ws.onopen = () => {
       bin.opened = true; bin.fails = 0;
       setTimeout(() => { if (bin.ws === ws && !st.tickOn) { bin.i++; try { ws.close(); } catch (e) {} } }, 20000); // connected but silent: try the next source
@@ -1586,7 +1597,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (bin.basis === null) bin.basis = base[base.length - 1].c - c;
       if (!marketOpen(Date.now() / 1000)) return;
       const bar = { t: t, o: +k.o + bin.basis, h: +k.h + bin.basis, l: +k.l + bin.basis, c: c + bin.basis }, last = base[base.length - 1];
-      st.liveT = t; st.tickOn = true; st.lastTick = Date.now();
+      st.liveT = t; st.tickOn = true; st.lastTick = Date.now(); bin.lastPx = Date.now();
       if (bar.t === last.t) base[base.length - 1] = bar;
       else if (bar.t > last.t) { base.push(bar); st.dirty = true; }
       else return;

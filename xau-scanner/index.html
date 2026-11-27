@@ -1711,6 +1711,9 @@ if (typeof module !== 'undefined') module.exports = Engine;
     if (open.early) return { R: 0, rem: 1, hit: [false, false, false], stop: open.sl, stopped: false, live: 0, px: E.price() };
     const s = E.statusAt(open, cur), tf = E.S.tfs[st.tf], base = E.S.base; if (!tf) return s;
     const j = E.lastDone(tf, cur), side = open.side, hit = s.hit.slice(); let stop = s.stop, rem = s.rem, R = s.R, stopped = false;
+    // A target that was seen hit stays hit. The feed's candles can be a little lower than the price the trader sees, and the next refresh used to un-hit it.
+    const hk = 'h:' + st.tf + ':' + open.sigT, mem = stickyHits[hk] || (stickyHits[hk] = loadSticky(hk));
+    for (let n = 0; n < 3; n++) if (mem[n] && !hit[n]) { hit[n] = true; const part = n < 2 ? 1 / 3 : rem; R += part * (n + 1); rem -= part; if (n === 0) stop = open.entry; if (n === 1) stop = open.tp[0]; }
     for (let k = Math.max(j >= 0 ? tf.bars[j].end + 1 : 0, (open.sigEnd || 0) + 1); k < base.length; k++) {
       const b = base[k];
       if (side === 1 ? b.l <= stop : b.h >= stop) { R += rem * ((stop - open.entry) * side / open.risk); rem = 0; stopped = true; break; }
@@ -1724,8 +1727,12 @@ if (typeof module !== 'undefined') module.exports = Engine;
       if (rem <= 1e-9) break;
     }
     const px = E.price();
+    if (!open.test && hit.some((h, n) => h && !mem[n])) { hit.forEach((h, n) => { if (h) mem[n] = true; }); saveSticky(hk, mem); }
     return { R: R, rem: rem, hit: hit, stop: stop, stopped: stopped, live: R + rem * ((px - open.entry) * side / open.risk), px: px };
   }
+  const stickyHits = {};
+  function loadSticky(k) { try { const v = JSON.parse(localStorage.getItem('xau.' + k) || 'null'); if (Array.isArray(v)) return v; } catch (e) {} return [false, false, false]; }
+  function saveSticky(k, v) { try { localStorage.setItem('xau.' + k, JSON.stringify(v)); } catch (e) {} }
   const tpSeen = {};
   function checkTargets() {
     if (!st.alerts) return;

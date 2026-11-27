@@ -1528,21 +1528,47 @@ if (typeof module !== 'undefined') module.exports = Engine;
   }
 
   /* Live ticks between Twelve Data refreshes: Binance XAUUSDT streams the forming candle, shifted by the measured gap to Twelve Data so prices line up. */
-  const SRCS = [{ u: 'wss://fstream.binance.com/ws/xauusdt@kline_', n: 'Binance XAUUSDT' }, { u: 'wss://stream.binance.com:9443/ws/paxgusdt@kline_', n: 'Binance PAXG (gold token)' }];
+  const SRCS = [{ u: 'wss://fstream.binance.com/ws/xauusdt@kline_', n: 'Binance XAUUSDT', k: 'kline' }, { u: 'wss://stream.binance.com:9443/ws/paxgusdt@kline_', n: 'Binance PAXG (gold token)', k: 'kline' },
+    { u: 'wss://ws.kraken.com/v2', n: 'Kraken PAXG (gold token)', k: 'kraken' }, { u: 'wss://api-pub.bitfinex.com/ws/2', n: 'Bitfinex XAUt (gold token)', k: 'bitfinex' }];
   const bin = { i: 0, opened: false, ws: null, retry: null, closes: new Map(), basis: null, last: 0, timer: null };
   function stopOverlay() {
     if (bin.retry) { clearTimeout(bin.retry); bin.retry = null; }
     if (bin.timer) { clearInterval(bin.timer); bin.timer = null; }
     if (bin.ws) { bin.ws.onclose = null; try { bin.ws.close(); } catch (e) {} bin.ws = null; }
-    st.tickOn = false; st.liveT = 0; bin.basis = null; bin.closes.clear();
+    st.tickOn = false; st.liveT = 0; bin.basis = null; bin.closes.clear(); bin.tb = null;
   }
   function startOverlay() {
     stopOverlay(); if (st.mode !== 'twelve') return;
     let ws; bin.opened = false; st.tickSrc = SRCS[bin.i % SRCS.length].n;
-    try { ws = new WebSocket(SRCS[bin.i % SRCS.length].u + (st.res === 1 ? '1m' : '5m')); } catch (e) { return; }
-    bin.ws = ws; let dirty = false;
+    const src = SRCS[bin.i % SRCS.length], step = (st.res === 1 ? 1 : 5) * 60;
+    try { ws = new WebSocket(src.u + (src.k === 'kline' ? (st.res === 1 ? '1m' : '5m') : '')); } catch (e) { bin.i++; bin.retry = setTimeout(startOverlay, 3000); return; }
+    bin.ws = ws; let dirty = false; bin.tb = null;
+    // Sources that stream trades or a last price (Kraken, Bitfinex) are turned into the same candle shape Binance sends, one candle per step.
+    const fromPrice = p => {
+      if (!(p > 0)) return null; const t = Math.floor(Date.now() / 1000 / step) * step, tb = bin.tb;
+      if (!tb || tb.t !== t) { const o0 = tb && tb.t < t ? tb.c : p; bin.tb = { t: t, o: o0, h: Math.max(o0, p), l: Math.min(o0, p), c: p }; return tb && tb.t < t ? { t: tb.t, o: tb.o, h: tb.h, l: tb.l, c: tb.c, x: true, close: true } : { t: t, o: p, h: p, l: p, c: p, x: false }; }
+      tb.h = Math.max(tb.h, p); tb.l = Math.min(tb.l, p); tb.c = p; return { t: t, o: tb.o, h: tb.h, l: tb.l, c: p, x: false };
+    };
     ws.onmessage = ev => {
-      let k; try { k = JSON.parse(ev.data).k; } catch (e) { return; } if (!k) return;
+      let k, m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (src.k === 'kline') k = m.k;
+      else {
+        let px = null;
+        if (src.k === 'kraken') { if (m.channel === 'ticker' && m.data && m.data[0]) px = +m.data[0].last; }
+        else if (Array.isArray(m) && Array.isArray(m[1]) && m[1].length >= 7) px = +m[1][6];
+        const r = fromPrice(px); if (!r) return;
+        if (r.close) { bin.closes.set(r.t, r.c); const mk = { t: r.t * 1000, c: r.c, o: r.o, h: r.h, l: r.l, x: true }; handleTick(mk); }
+        k = { t: bin.tb.t * 1000, o: bin.tb.o, h: bin.tb.h, l: bin.tb.l, c: bin.tb.c, x: false };
+      }
+      if (!k) return; handleTick(k);
+    };
+    ws.onopen = () => {
+      bin.opened = true; bin.fails = 0;
+      setTimeout(() => { if (bin.ws === ws && !st.tickOn) { bin.i++; try { ws.close(); } catch (e) {} } }, 20000); // connected but silent: try the next source
+      try { if (src.k === 'kraken') ws.send(JSON.stringify({ method: 'subscribe', params: { channel: 'ticker', symbol: ['PAXG/USD'] } })); if (src.k === 'bitfinex') ws.send(JSON.stringify({ event: 'subscribe', channel: 'ticker', symbol: 'tXAUT:USD' })); } catch (e) {}
+      if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250);
+    };
+    function handleTick(k) {
       const t = k.t / 1000, c = +k.c, base = E.S.base; if (!base.length || st.mode !== 'twelve') return;
       if (k.x) bin.closes.set(t, c);
       // gap to Twelve Data: newest completed Twelve Data candle that Binance also closed
@@ -1555,8 +1581,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
       else if (bar.t > last.t) { base.push(bar); st.dirty = true; }
       else return;
       dirty = true;
-    };
-    ws.onopen = () => { bin.opened = true; bin.fails = 0; if (!bin.timer) bin.timer = setInterval(() => { if (!dirty || st.dirty) return; dirty = false; renderTop(); drawChart(); renderSignal(); renderBottom(); checkTargets(); }, 250); };
+    }
     ws.onclose = () => { st.tickOn = false; st.liveT = 0; if (!bin.opened) bin.i++; bin.fails = (bin.fails || 0) + 1; bin.retry = setTimeout(startOverlay, Math.min(60000, 3000 * bin.fails)); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
   }

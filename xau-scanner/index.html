@@ -235,7 +235,7 @@ table.t td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); white
 .jf label > span { display: block; margin-bottom: 4px; font: 600 9.5px var(--f-body); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); }
 .tiny { padding: 3px 8px; font-size: 11px; }
 /* clients (signed in, not admin) do not get the backtest or the test signal; the admin keeps everything */
-body.client #testSig, body.client #btOpen2, body.client #snapCard { display: none !important; }
+body.client #testSig, body.client #btOpen2, body.client #snapCard, body.client #dataOpen, body.client #paneH > div:first-child { display: none !important; }
 @media (max-width: 960px) { .acts { flex-wrap: wrap; } }
 </style>
 
@@ -2438,7 +2438,7 @@ if (typeof module !== 'undefined') module.exports = Engine;
     $('#jSide').value = o.side === 1 ? 'buy' : 'sell'; $('#jTf').value = String(st.tf); $('#jStrat').value = o.strat || o.trigger || ''; $('#jEntry').value = (+o.entry).toFixed(2); $('#jSl').value = (+o.sl).toFixed(2); m.textContent = 'Filled from the current signal. Add the exit price when you close the trade.';
   }
   function hRender() {
-    const m = +$('#hTf').value, rows = E.closedAt(m, E.S.cursor).slice(-80).reverse(), open = E.openAt(m, E.S.cursor);
+    const cl = document.body.classList.contains('client'), m = cl ? 5 : +$('#hTf').value, open = E.openAt(m, E.S.cursor), rows = E.closedAt(m, E.S.cursor).slice(cl ? (open ? -2 : -3) : -80).reverse(); // clients see only the latest three signals, on the 5m chart
     const row = (t, isOpen) => '<tr><td>' + esc(stampL(t.sigT + m * 60)) + '</td><td class="' + (t.side === 1 ? 'up' : 'dn') + '">' + (t.side === 1 ? 'Buy' : 'Sell') + '</td><td>' + esc(SNAME[t.strat] || t.strat || '') + '</td><td>' + fmt(t.entry) + '</td><td>' + fmt(t.sl) + '</td><td>' + t.tp.map(x => fmt(x, 0)).join(' / ') + '</td><td>' + (isOpen ? 'open' : esc(t.exitK)) + '</td><td class="' + (isOpen ? '' : t.R >= 0 ? 'up' : 'dn') + '">' + (isOpen ? '' : sgn(t.R)) + '</td></tr>';
     $('#hTable').innerHTML = '<tr><th>Posted (candle close)</th><th>Side</th><th>Strategy</th><th>Entry</th><th>Stop</th><th>TP1 / TP2 / TP3</th><th>Exit</th><th>R</th></tr>' + (open ? row(open, true) : '') + (rows.length ? rows.map(t => row(t, false)).join('') : '<tr><td colspan="8" class="mute">No closed signals on this timeframe in the loaded data.</td></tr>');
   }
